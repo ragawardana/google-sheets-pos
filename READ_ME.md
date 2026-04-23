@@ -49,7 +49,6 @@
 ├── Code.gs                # Main backend: API Router, Database helpers, Business logic
 ├── Index.html             # SPA Frontend: Login UI, Dashboard, Cashier, Management, etc.
 ├── Scanner.html           # Scanner Popup UI for the "📷 Buka Scanner Barcode" function in Spreadsheet
-├── appsscript.json        # Project manifest (Scopes, OAuth, etc.)
 └── README.md              # This documentation
 ```
 
