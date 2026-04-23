@@ -22,11 +22,7 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- Thermal Printer Libraries -->
-    <script
-        src="https://cdn.jsdelivr.net/npm/thermal-printer-encoder@3.0.0/dist/thermal-printer-encoder.umd.min.js"></script>
-    <script
-        src="https://cdn.jsdelivr.net/npm/@point-of-sale/webbluetooth-receipt-printer@2.0.0/dist/webbluetooth-receipt-printer.umd.min.js"></script>
+
 
     <script>
         tailwind.config = {
@@ -774,13 +770,10 @@
                 <div id="transaction-detail-content"></div>
             </div>
             <div class="p-4 border-t border-slate-100 flex flex-wrap justify-end gap-3 bg-slate-50">
-                <button onclick="printThermalFromHistory(currentDetailTxId)"
-                    class="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl font-bold transition flex items-center gap-2">
-                    <i class="ph-bold ph-bluetooth"></i> Thermal
-                </button>
+
                 <button onclick="printReceiptA6(currentDetailTxId)"
                     class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold transition flex items-center gap-2">
-                    <i class="ph-bold ph-printer"></i> Cetak A6
+                    <i class="ph-bold ph-printer"></i> Cetak Struk
                 </button>
                 <button onclick="sendInvoiceByEmail(currentDetailTxId)"
                     class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold transition flex items-center gap-2">
@@ -939,11 +932,7 @@
                             onkeyup="handleSearchInput(event)"
                             class="w-full pl-11 pr-4 py-3 bg-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-primary focus:bg-white transition text-sm sm:text-[15px] font-medium text-slate-700">
                     </div>
-                    <button onclick="connectThermalPrinter()"
-                        class="hidden lg:flex bg-slate-100 text-slate-600 px-4 py-3 rounded-2xl items-center justify-center hover:bg-green-50 hover:text-green-600 transition"
-                        title="Printer Thermal">
-                        <i class="ph-bold ph-bluetooth text-xl sm:text-2xl"></i>
-                    </button>
+
                     <button onclick="startScanner((text) => handleScanResult(text))"
                         class="bg-slate-800 text-white px-4 py-3 rounded-2xl flex items-center justify-center hover:bg-slate-700 transition shadow-md shadow-slate-800/20 flex-shrink-0"
                         title="Scan Kamera">
@@ -952,11 +941,7 @@
                 </div>
 
                 <div class="flex items-center justify-end gap-2 lg:hidden w-auto sm:w-1/3 ml-2">
-                    <button onclick="connectThermalPrinter()"
-                        class="text-slate-500 bg-slate-100 hover:bg-green-50 hover:text-green-500 w-11 h-11 rounded-2xl flex items-center justify-center transition"
-                        title="Hubungkan Printer">
-                        <i class="ph-bold ph-bluetooth text-xl"></i>
-                    </button>
+
                     <button id="mobile-cart-trigger" onclick="toggleCartPanel()"
                         class="relative bg-primary/10 text-primary w-11 h-11 rounded-2xl flex items-center justify-center hover:bg-primary/20 transition hidden">
                         <i class="ph-fill ph-shopping-cart text-xl"></i>
@@ -1253,11 +1238,17 @@
             <main class="flex-1 overflow-y-auto p-4 sm:p-8 pb-32 lg:pb-8 tab-content hidden bg-white"
                 id="confirmations-tab">
                 <div class="max-w-6xl mx-auto">
-                    <div class="mb-8">
-                        <h2 class="text-2xl font-bold text-slate-800 tracking-tight">Konfirmasi Pembayaran Non-Tunai
-                        </h2>
-                        <p class="text-slate-500 text-sm font-medium mt-1">Daftar transaksi yang menunggu konfirmasi
-                            penerimaan dana.</p>
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
+                        <div>
+                            <h2 class="text-2xl font-bold text-slate-800 tracking-tight">Konfirmasi Pembayaran Non-Tunai
+                            </h2>
+                            <p class="text-slate-500 text-sm font-medium mt-1">Daftar transaksi yang menunggu konfirmasi
+                                penerimaan dana.</p>
+                        </div>
+                        <button onclick="loadPendingConfirmations()"
+                            class="bg-white border border-slate-200 text-slate-600 px-5 py-3 rounded-2xl font-bold hover:bg-slate-50 transition flex items-center gap-2 shadow-sm">
+                            <i class="ph-bold ph-arrows-clockwise text-lg"></i> Refresh Data
+                        </button>
                     </div>
                     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                         <div class="overflow-x-auto">
@@ -1400,6 +1391,7 @@
                                     <input type="url" id="set-store-logo" placeholder="https://..."
                                         class="w-full px-4 py-3 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary outline-none text-slate-800 font-medium">
                                 </div>
+
                             </div>
                         </div>
                         <div class="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100">
@@ -1562,6 +1554,21 @@
     </div>
 
     <script>
+        function escapeHTML(str) {
+            if (str == null) return '';
+            return String(str).replace(/[&<>"'/]/g, function (s) {
+                const entityMap = {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;',
+                    '/': '&#x2F;'
+                };
+                return entityMap[s];
+            });
+        }
+
         let state = {
             user: null,
             products: [],
@@ -1572,11 +1579,14 @@
             usersList: [],
             customers: [],
             historyTransactions: [],
+            txCache: {},
             computed: {
                 uiCart: [],
+                bonusItems: [],
                 subtotal: 0,
                 totalDiscount: 0,
-                total: 0
+                total: 0,
+                promosUsed: []
             },
             activeTab: 'pos'
         };
@@ -1589,14 +1599,17 @@
         let currentDetailTxId = null;
         let searchTimeout = null;
 
-        let thermalPrinter = null;
-        let printerConnected = false;
-        let printerEncoder = null;
-        let lastConnectedDevice = null;
 
         const formatRp = (num) => {
             if (num === null || num === undefined) return 'Rp 0';
             return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(num);
+        };
+
+        const getTxDetailData = async (txId) => {
+            if (state.txCache[txId]) return state.txCache[txId];
+            const res = await apiCall('getTransactionDetail', { transactionId: txId });
+            state.txCache[txId] = res;
+            return res;
         };
 
         const getFallbackImage = () => 'https://placehold.co/400x400/f1f5f9/94a3b8?text=No+Photo';
@@ -1648,8 +1661,7 @@
                     if (res.success) {
                         resolve(res.data);
                     } else {
-                        // Jika error terkait sesi, arahkan ke login
-                        if (res.error && (res.error.includes('Sesi') || res.error.includes('Token') || res.error.includes('Akses ditolak'))) {
+                        if (res.code === 'SESSION_EXPIRED') {
                             sessionStorage.removeItem('pos_token');
                             sessionStorage.removeItem('pos_user');
                             showView('login');
@@ -1689,150 +1701,7 @@
             }, 100);
         };
 
-        const initThermalPrinter = () => {
-            try {
-                printerEncoder = new ThermalPrinterEncoder({ language: 'esc-pos', width: 42 });
-                thermalPrinter = new WebBluetoothReceiptPrinter();
 
-                thermalPrinter.addEventListener('connected', (device) => {
-                    console.log(`✅ Printer terhubung: ${device.name}`);
-                    printerConnected = true;
-                    lastConnectedDevice = device;
-                    printerEncoder = new ThermalPrinterEncoder({ language: device.language || 'esc-pos', width: 42 });
-                    showToast(`Terhubung ke ${device.name}`, 'success');
-                });
-
-                thermalPrinter.addEventListener('disconnected', () => {
-                    console.log('🔌 Printer terputus');
-                    printerConnected = false;
-                    showToast('Printer terputus', 'error');
-                });
-
-                try {
-                    const savedDevice = localStorage.getItem('thermalPrinterDevice');
-                    if (savedDevice) thermalPrinter.reconnect(JSON.parse(savedDevice));
-                } catch (e) { }
-            } catch (e) {
-                console.warn('Thermal printer library not fully loaded');
-            }
-        };
-
-        const connectThermalPrinter = async () => {
-            if (!thermalPrinter) {
-                showToast('Library printer tidak tersedia', 'error');
-                return;
-            }
-            try {
-                toggleLoader(true, 'Menghubungkan ke printer...');
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error('Koneksi printer timeout')), 10000)
-                );
-                await Promise.race([thermalPrinter.connect(), timeoutPromise]);
-                if (lastConnectedDevice) {
-                    localStorage.setItem('thermalPrinterDevice', JSON.stringify(lastConnectedDevice));
-                }
-                showToast('Printer berhasil terhubung', 'success');
-            } catch (err) {
-                console.error('Gagal menghubungkan printer:', err);
-                showToast('Gagal menghubungkan printer. Pastikan Bluetooth aktif dan printer dalam mode pairing.', 'error');
-            } finally {
-                toggleLoader(false);
-            }
-        };
-
-        const buildThermalReceipt = (transactionData) => {
-            if (!printerEncoder) printerEncoder = new ThermalPrinterEncoder({ language: 'esc-pos', width: 42 });
-            printerEncoder.initialize();
-
-            const store = state.settings || {
-                storeName: 'Toko Pro',
-                storeAddress: 'Jl. Contoh No. 123',
-                storeContact: '081234567890'
-            };
-
-            printerEncoder.align('center').bold(true).line(store.storeName).bold(false)
-                .line(store.storeAddress).line(store.storeContact).newline();
-
-            const header = transactionData.header;
-            printerEncoder.align('left')
-                .line(`No: ${header.id}`)
-                .line(`Tgl: ${header.formattedDate}`)
-                .line(`Kasir: ${header.cashier}`)
-                .newline();
-
-            printerEncoder.line('------------------------------------------');
-            printerEncoder.line('Item            Qty   Harga   Subtotal');
-            printerEncoder.line('------------------------------------------');
-
-            transactionData.items.forEach(item => {
-                let name = item.productName || 'Produk';
-                if (name.length > 14) name = name.substring(0, 13) + '.';
-                else name = name.padEnd(14, ' ');
-                const qty = (item.qty || 0).toString().padStart(3, ' ');
-                const price = formatRp(item.price || 0).replace(/[^\d]/g, '').padStart(7, ' ');
-                const subtotal = formatRp(item.subtotal || 0).replace(/[^\d]/g, '').padStart(9, ' ');
-                printerEncoder.line(`${name} ${qty} ${price} ${subtotal}`);
-            });
-
-            printerEncoder.line('------------------------------------------');
-            printerEncoder.align('right').bold(true)
-                .line(`Total: ${formatRp(header.total)}`).bold(false)
-                .line(`Tunai: ${formatRp(header.amountPaid)}`)
-                .line(`Kembali: ${formatRp(header.change)}`)
-                .align('center').newline()
-                .line('--- Terima Kasih ---')
-                .line('Barang yang sudah dibeli')
-                .line('tidak dapat dikembalikan')
-                .newline().newline();
-
-            printerEncoder.cut('full');
-            return printerEncoder.encode();
-        };
-
-        const printThermal = async (transactionData) => {
-            if (!transactionData || !transactionData.header || !transactionData.header.id) {
-                showToast('Data transaksi tidak valid', 'error');
-                return;
-            }
-
-            if (!thermalPrinter || !printerConnected) {
-                const shouldConnect = confirm('Printer belum terhubung. Hubungkan sekarang?');
-                if (shouldConnect) {
-                    await connectThermalPrinter();
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                }
-                if (!printerConnected) {
-                    showToast('Tidak dapat terhubung ke printer. Beralih ke cetak A6.', 'error');
-                    printReceiptA6(transactionData.header.id);
-                    return;
-                }
-            }
-
-            toggleLoader(true, 'Mencetak struk...');
-            try {
-                const printData = buildThermalReceipt(transactionData);
-                await thermalPrinter.print(printData);
-                showToast('Struk berhasil dicetak!', 'success');
-            } catch (err) {
-                console.error('Gagal mencetak:', err);
-                showToast('Gagal mencetak ke printer thermal. Beralih ke cetak A6.', 'error');
-                printReceiptA6(transactionData.header.id);
-            } finally {
-                toggleLoader(false);
-            }
-        };
-
-        const printThermalFromHistory = async (transactionId) => {
-            toggleLoader(true, 'Memuat data transaksi...');
-            try {
-                const txData = await apiCall('getTransactionDetail', { transactionId });
-                await printThermal(txData);
-            } catch (err) {
-                showToast('Gagal memuat data: ' + err, 'error');
-            } finally {
-                toggleLoader(false);
-            }
-        };
 
         const printReceiptA6 = async (transactionId) => {
             toggleLoader(true, 'Menyiapkan struk...');
@@ -1874,7 +1743,7 @@
         };
 
         const initApp = async () => {
-            initThermalPrinter();
+
             try {
                 state.settings = await apiCall('getSettings');
                 applySettingsToUI();
@@ -1937,6 +1806,7 @@
             if (storeContactInput) storeContactInput.value = s.storeContact || '';
             const storeLogoInput = document.getElementById('set-store-logo');
             if (storeLogoInput) storeLogoInput.value = s.storeLogo || '';
+
         };
 
         const setupUserRole = () => {
@@ -2135,6 +2005,28 @@
             }
         };
 
+        async function refreshProducts() {
+            const products = await apiCall('getProducts');
+            state.products = products;
+            if (state.activeTab === 'pos') renderProducts(state.products);
+            if (state.activeTab === 'inventory' && (state.user?.role === 'admin' || state.user?.role === 'gudang')) {
+                renderInventory(state.products);
+            }
+            calculateAndRenderCart();
+        }
+
+        async function refreshCustomers() {
+            state.customers = await apiCall('getCustomers');
+            renderCustomersDropdown();
+            if (state.activeTab === 'customers') renderCustomers();
+        }
+
+        async function refreshPromotions() {
+            state.promotions = await apiCall('getPromotions');
+            if (state.user?.role === 'admin') renderPromotions();
+            calculateAndRenderCart();
+        }
+
         const loadAllData = async () => {
             const productSkeleton = document.getElementById('product-skeleton');
             const productGrid = document.getElementById('product-grid');
@@ -2185,8 +2077,8 @@
             const fragment = document.createDocumentFragment();
 
             products.forEach(p => {
-                const sku = p.sku || '-';
-                const name = p.name || 'Tanpa Nama';
+                const sku = escapeHTML(p.sku || '-');
+                const name = escapeHTML(p.name || 'Tanpa Nama');
                 const price = p.price || 0;
                 const stock = p.stock || 0;
                 const image = p.image?.trim() || fb;
@@ -2271,6 +2163,7 @@
             let totalDiscount = 0;
             let uiCart = JSON.parse(JSON.stringify(state.cart));
             let promosUsed = [];
+            let bonusItems = [];
 
             uiCart.forEach(item => {
                 subtotal += item.price * item.qty;
@@ -2301,7 +2194,7 @@
                 } else if (p.type === 'BUY_X_GET_Y') {
                     const rProd = state.products.find(prod => prod.sku === p.rewardSku);
                     if (rProd) {
-                        uiCart.push({
+                        bonusItems.push({
                             id: rProd.id,
                             sku: rProd.sku,
                             name: rProd.name,
@@ -2321,6 +2214,7 @@
 
             state.computed = {
                 uiCart,
+                bonusItems,
                 subtotal,
                 totalDiscount,
                 total: subtotal - totalDiscount,
@@ -2331,7 +2225,7 @@
         };
 
         const renderCartUI = () => {
-            const { uiCart, subtotal, totalDiscount, total } = state.computed;
+            const { uiCart, bonusItems, subtotal, totalDiscount, total } = state.computed;
             const cont = document.getElementById('cart-items');
             const empty = document.getElementById('cart-empty');
             const btn = document.getElementById('btn-checkout');
@@ -2339,7 +2233,12 @@
 
             if (!cont) return;
 
-            if (uiCart.length === 0) {
+            const allItems = [
+                ...uiCart,
+                ...(bonusItems || [])
+            ];
+
+            if (allItems.length === 0) {
                 cont.innerHTML = '';
                 empty.style.display = 'flex';
                 btn.disabled = true;
@@ -2355,7 +2254,7 @@
             const fragment = document.createDocumentFragment();
             let count = 0;
 
-            uiCart.forEach(item => {
+            allItems.forEach(item => {
                 if (!item.isPromo) count += item.qty;
                 const el = document.createElement('div');
 
@@ -2492,9 +2391,9 @@
           <td class="p-4 text-center">
             <img src="${p.image || fb}" class="w-10 h-10 rounded-lg object-cover mx-auto bg-slate-100" onerror="this.src='${fb}'">
           </td>
-          <td class="p-4 text-[13px] font-mono text-slate-500">${p.sku || '-'}</td>
-          <td class="p-4 font-bold text-slate-800">${p.name || '-'}</td>
-          <td class="p-4 text-slate-600 hidden md:table-cell">${isGudang ? '***' : formatRp(p.basePrice)}</td>
+          <td class="p-4 text-[13px] font-mono text-slate-500">${escapeHTML(p.sku || '-')}</td>
+          <td class="p-4 font-bold text-slate-800">${escapeHTML(p.name || '-')}</td>
+          <td class="p-4 text-slate-600 hidden md:table-cell">${(isGudang || p.basePrice == null) ? '***' : formatRp(p.basePrice)}</td>
           <td class="p-4 font-bold text-primary">${formatRp(p.price)}</td>
           <td class="p-4 text-center">
             <span class="px-2.5 py-1 rounded-md text-xs font-bold ${p.stock > 10 ? 'bg-emerald-100 text-emerald-700' : (p.stock > 0 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700')}">${p.stock || 0}</span>
@@ -2608,7 +2507,7 @@
                     showToast("Produk ditambahkan!");
                 }
                 toggleProductModal(false);
-                await loadAllData();
+                await refreshProducts();
             } catch (err) {
                 showToast(err, 'error');
             } finally {
@@ -2643,7 +2542,7 @@
                 await apiCall('addStockBatch', data);
                 showToast("Restock berhasil!");
                 toggleRestockModal(false);
-                await loadAllData();
+                await refreshProducts();
             } catch (err) {
                 showToast(err, 'error');
             } finally {
@@ -2759,7 +2658,7 @@
                 await apiCall('savePromotion', data);
                 showToast("Promo berhasil disimpan!");
                 togglePromoModal(false);
-                await loadAllData();
+                await refreshPromotions();
             } catch (err) {
                 showToast(err, 'error');
             } finally {
@@ -2780,10 +2679,10 @@
             state.customers.forEach(c => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-          <td class="p-4 font-mono text-xs">${c.id || '-'}</td>
-          <td class="p-4 font-medium">${c.name || '-'}</td>
-          <td class="p-4 text-sm">${c.phone || '-'}<br><span class="text-slate-400">${c.email || '-'}</span></td>
-          <td class="p-4 text-sm max-w-xs truncate">${c.address || '-'}</td>
+          <td class="p-4 font-mono text-xs">${escapeHTML(c.id || '-')}</td>
+          <td class="p-4 font-medium">${escapeHTML(c.name || '-')}</td>
+          <td class="p-4 text-sm">${escapeHTML(c.phone || '-')}<br><span class="text-slate-400">${escapeHTML(c.email || '-')}</span></td>
+          <td class="p-4 text-sm max-w-xs truncate">${escapeHTML(c.address || '-')}</td>
           <td class="p-4 text-center">
             <button onclick="openCustomerModal('${c.id}')" class="bg-blue-50 text-blue-600 p-2 rounded-lg mr-1"><i class="ph-bold ph-pencil-simple"></i></button>
             <button onclick="confirmDelete('customer', '${c.id}')" class="bg-rose-50 text-rose-600 p-2 rounded-lg"><i class="ph-bold ph-trash"></i></button>
@@ -2845,7 +2744,7 @@
                 await apiCall('saveCustomer', data);
                 showToast("Pelanggan berhasil disimpan!");
                 toggleCustomerModal(false);
-                await loadAllData();
+                await refreshCustomers();
             } catch (err) {
                 showToast(err, 'error');
             } finally {
@@ -3111,8 +3010,8 @@
           <td class="p-4 text-slate-600">${customerName}</td>
           <td class="p-4 text-center" onclick="event.stopPropagation()">
             <div class="flex items-center justify-center gap-2">
-              <button onclick="printThermalFromHistory('${tx.id}')" class="bg-green-50 text-green-600 hover:bg-green-500 hover:text-white p-2 rounded-lg transition" title="Cetak Thermal"><i class="ph-bold ph-bluetooth"></i></button>
-              <button onclick="printReceiptA6('${tx.id}')" class="bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white p-2 rounded-lg transition" title="Cetak A6"><i class="ph-bold ph-printer"></i></button>
+
+              <button onclick="printReceiptA6('${tx.id}')" class="bg-blue-50 text-blue-600 hover:bg-blue-500 hover:text-white p-2 rounded-lg transition" title="Cetak Struk"><i class="ph-bold ph-printer"></i></button>
               <button onclick="sendInvoiceByEmail('${tx.id}')" class="bg-indigo-50 text-indigo-600 hover:bg-indigo-500 hover:text-white p-2 rounded-lg transition" title="Kirim Email"><i class="ph-bold ph-envelope"></i></button>
             </div>
           </td>
@@ -3130,7 +3029,7 @@
             currentDetailTxId = transactionId;
             toggleLoader(true, 'Memuat detail transaksi...');
             try {
-                const res = await apiCall('getTransactionDetail', { transactionId });
+                const res = await getTxDetailData(transactionId);
                 renderTransactionDetail(res);
                 toggleTransactionDetailModal(true);
             } catch (err) {
@@ -3175,14 +3074,28 @@
             if (modal) modal.classList.toggle('hidden', !show);
         };
 
-        const openPaymentModal = () => {
+        const openPaymentModal = async () => {
             if (!state.computed || state.computed.uiCart.length === 0) return;
-            currentCheckoutTotal = state.computed.total;
-            document.getElementById('pay-total-display').innerText = formatRp(currentCheckoutTotal);
-            const amtInput = document.getElementById('pay-amount-input');
-            if (amtInput) amtInput.value = currentCheckoutTotal;
-            calculateChange();
-            togglePaymentModal(true);
+            toggleLoader(true, 'Memvalidasi total...');
+            try {
+                const cartToValidate = state.computed.uiCart.filter(i => !i.isPromo);
+                const serverResult = await apiCall('calculateCartTotals', { cart: cartToValidate });
+
+                state.computed.total = serverResult.finalTotal;
+                state.computed.totalDiscount = serverResult.totalDiscount;
+                state.computed.promosUsed = serverResult.promosApplied;
+
+                currentCheckoutTotal = serverResult.finalTotal;
+                document.getElementById('pay-total-display').innerText = formatRp(currentCheckoutTotal);
+                const amtInput = document.getElementById('pay-amount-input');
+                if (amtInput) amtInput.value = currentCheckoutTotal;
+                calculateChange();
+                togglePaymentModal(true);
+            } catch (err) {
+                showToast('Gagal memvalidasi transaksi: ' + err, 'error');
+            } finally {
+                toggleLoader(false);
+            }
         };
 
         const calculateChange = () => {
@@ -3203,7 +3116,6 @@
         };
 
         const executeCheckout = async () => {
-            // Ambil metode pembayaran yang dipilih
             const paymentMethodElem = document.querySelector('input[name="payment-method"]:checked');
             const paymentMethod = paymentMethodElem ? paymentMethodElem.value : 'cash';
 
@@ -3222,7 +3134,7 @@
             try {
                 const res = await apiCall('checkout', {
                     userId: state.user.id,
-                    cart: state.computed.uiCart,
+                    cart: state.computed.uiCart.filter(item => !item.isPromo),
                     promosUsed: state.computed.promosUsed,
                     total: currentCheckoutTotal,
                     customerId: custId,
@@ -3242,21 +3154,13 @@
                         document.getElementById('cart-overlay')?.classList.remove('open');
                     }
                     await loadAllData();
-                    return; // Hentikan, tidak perlu cetak struk atau email
+                    return;
                 }
 
                 showToast(`Pembayaran Sukses! Kembalian: ${formatRp(amountPaid - currentCheckoutTotal)}`);
 
                 setTimeout(async () => {
-                    const choice = confirm('Cetak struk?\n\nOK = Thermal (Bluetooth)\nCancel = A6 (Popup)');
-                    if (choice) {
-                        try {
-                            const txDetail = await apiCall('getTransactionDetail', { transactionId: txId });
-                            await printThermal(txDetail);
-                        } catch (e) {
-                            printReceiptA6(txId);
-                        }
-                    } else {
+                    if (confirm('Pembayaran Berhasil. Apakah Anda ingin mencetak struk?')) {
                         printReceiptA6(txId);
                     }
 
@@ -3390,9 +3294,22 @@
             }
         };
 
-        // Polling untuk cek pending confirmations setiap 60 detik
         setInterval(async () => {
-            if (state.user?.role === 'admin' && state.activeTab !== 'confirmations') {
+            if (state.user?.role === 'kasir') {
+                try {
+                    const res = await apiCall('checkConfirmedPayments');
+                    if (res && res.length > 0) {
+                        res.forEach(item => {
+                            apiCall('markAsNotified', { confirmationId: item.confirmationId });
+                            if (confirm(`✅ Pembayaran Nontunai Berhasil!\nTransaksi: ${item.transactionId} telah dikonfirmasi Admin.\n\nApakah Anda ingin mencetak struk sekarang?`)) {
+                                printReceiptA6(item.transactionId);
+                            }
+                        });
+                    }
+                } catch (e) {
+                    console.warn("Gagal mengecek notifikasi kasir", e);
+                }
+            } else if (state.user?.role === 'admin' && state.activeTab !== 'confirmations') {
                 try {
                     const pending = await apiCall('getPendingConfirmations');
                     if (pending.length > 0) {
@@ -3400,7 +3317,7 @@
                     }
                 } catch (e) { }
             }
-        }, 60000);
+        }, 15000);
 
         const printReport = async (type) => {
             let startDate = '', endDate = '';

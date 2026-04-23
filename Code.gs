@@ -50,7 +50,7 @@ function serverRouter(payload) {
             case 'deleteUser': return processDeleteUser(data);
             case 'updateProfile': return processUpdateProfile(data);
 
-            case 'getProducts': return getProducts();
+            case 'getProducts': return getProducts(data);
             case 'addProduct': return processAddProduct(data);
             case 'updateProduct': return processUpdateProduct(data);
             case 'deleteProduct': return processDeleteProduct(data);
@@ -64,6 +64,7 @@ function serverRouter(payload) {
             case 'saveCustomer': return processSaveCustomer(data);
             case 'deleteCustomer': return processDeleteCustomer(data);
 
+            case 'calculateCartTotals': return calculateCartTotalsApi(data);
             case 'checkout': return processCheckout(data);
             case 'generateReceiptHtml': return { success: true, data: generateReceiptHtml(data.transactionId) };
             case 'sendInvoiceEmail': return sendInvoiceEmail(data);
@@ -71,6 +72,8 @@ function serverRouter(payload) {
             case 'getTransactionDetail': return getTransactionDetail(data.transactionId);
             case 'getPendingConfirmations': return getPendingConfirmations();
             case 'processPaymentConfirmation': return processPaymentConfirmation(data);
+            case 'checkConfirmedPayments': return checkConfirmedPayments(data);
+            case 'markAsNotified': return processMarkAsNotified(data);
             case 'generateReport': return generateReport(data);
 
             case 'getDashboardData': return getDashboardData();
@@ -82,7 +85,11 @@ function serverRouter(payload) {
         }
     } catch (error) {
         console.error("Router Error: ", error.message);
-        return { success: false, error: error.message };
+        let errorCode = 'GENERAL_ERROR';
+        if (error.message.includes('Sesi')) errorCode = 'SESSION_EXPIRED';
+        else if (error.message.includes('Akses ditolak')) errorCode = 'ACCESS_DENIED';
+        else if (error.message.includes('tidak ditemukan')) errorCode = 'NOT_FOUND';
+        return { success: false, error: error.message, code: errorCode };
     }
 }
 
@@ -144,7 +151,6 @@ function formatRupiah(amount) {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
 }
 
-// --- Security & Session Helpers ---
 function hashPassword(password, salt = '') {
     const combined = salt + password;
     const hash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, combined);
@@ -189,10 +195,14 @@ function destroySession(token) {
     }
 }
 
-// --- Helper Extensions ---
 function getProductBySku(sku) {
     const products = getProducts().data;
     return products.find(p => p.sku === sku);
+}
+
+function calculateCartTotalsApi(data) {
+    const calculation = calculateCartTotals(data.cart);
+    return { success: true, data: calculation };
 }
 
 function calculateCartTotals(cart) {
@@ -315,6 +325,10 @@ function getCustomers() {
 }
 
 function processSaveCustomer(data) {
+    const session = data.__session;
+    if (!session || (session.role !== 'admin' && session.role !== 'kasir')) {
+        throw new Error('Akses ditolak. Hanya admin dan kasir yang dapat mengelola pelanggan.');
+    }
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(15000)) throw new Error("Sistem sibuk. Gagal menyimpan data pelanggan.");
     try {
@@ -380,21 +394,12 @@ function processLogin(data) {
         const row = records[i];
         if (row[1] === username) {
             const storedHash = row[2];
-            let salt = row[4] || '';
+            let salt = row[4] || ''; // Kolom E (index 4)
+            
             let inputHash = hashPassword(password, salt);
-
-            // Fallback: jika salt kosong, coba hash tanpa salt (cara lama)
+            
             if (!salt) {
-                const oldHash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, password)
-                    .map(b => (b < 0 ? b + 256 : b).toString(16).padStart(2, '0')).join('');
-                if (storedHash === oldHash) {
-                    // Upgrade: generate salt dan update hash
-                    salt = generateSalt();
-                    const newHash = hashPassword(password, salt);
-                    db.getRange(i + 1, 3).setValue(newHash);
-                    db.getRange(i + 1, 5).setValue(salt);
-                    inputHash = newHash;
-                }
+                throw new Error("Akun ini menggunakan format lama. Silakan hubungi Admin untuk reset password.");
             }
 
             if (storedHash === inputHash) {
@@ -492,6 +497,12 @@ function processDeleteUser(data) {
 }
 
 function processUpdateProfile(data) {
+    const session = data.__session;
+    if (!session) throw new Error("Sesi tidak valid.");
+    if (data.id !== session.userId && session.role !== 'admin') {
+        throw new Error("Akses ditolak. Anda tidak berhak mengubah profil pengguna lain.");
+    }
+
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(15000)) throw new Error("Sistem sibuk.");
     try {
@@ -575,7 +586,10 @@ function processSaveSettings(data) {
         if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, 2).clearContent();
 
         const rows = [];
-        for (const key in data) rows.push([key, data[key]]);
+        for (const key in data) {
+            if (key === '__session') continue;
+            rows.push([key, data[key]]);
+        }
         if (rows.length > 0) sheet.getRange(2, 1, rows.length, 2).setValues(rows);
 
         CacheService.getScriptCache().remove('store_settings');
@@ -585,28 +599,38 @@ function processSaveSettings(data) {
     }
 }
 
-function getProducts() {
+function getProducts(data = {}) {
     const cache = CacheService.getScriptCache();
     const cachedData = cache.get('products_data');
-    if (cachedData) return { success: true, data: JSON.parse(cachedData) };
+    let products = [];
 
-    const ss = getDb();
-    const db = ss.getSheetByName(SHEET_PRODUCTS);
-    const records = db.getDataRange().getValues();
-    const products = [];
+    if (cachedData) {
+        products = JSON.parse(cachedData);
+    } else {
+        const ss = getDb();
+        const db = ss.getSheetByName(SHEET_PRODUCTS);
+        const records = db.getDataRange().getValues();
 
-    for (let i = 1; i < records.length; i++) {
-        products.push({
-            id: records[i][0],
-            sku: records[i][1],
-            name: records[i][2],
-            basePrice: records[i][3],
-            price: records[i][4],
-            stock: records[i][5],
-            image: records[i][6] || ""
-        });
+        for (let i = 1; i < records.length; i++) {
+            products.push({
+                id: records[i][0],
+                sku: records[i][1],
+                name: records[i][2],
+                basePrice: records[i][3],
+                price: records[i][4],
+                stock: records[i][5],
+                image: records[i][6] || ""
+            });
+        }
+        cache.put('products_data', JSON.stringify(products), 600);
     }
-    cache.put('products_data', JSON.stringify(products), 600);
+
+    const session = data.__session;
+    if (session && session.role === 'gudang') {
+        const safeProducts = products.map(({ basePrice, ...rest }) => rest); // Hapus field basePrice
+        return { success: true, data: safeProducts };
+    }
+
     return { success: true, data: products };
 }
 
@@ -619,17 +643,22 @@ function processAddProduct(data) {
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(15000)) throw new Error("Sistem sedang menyimpan data.");
     try {
-        const products = getProducts().data;
-        const existing = products.find(p => p.sku === data.sku);
-        if (existing) {
-            throw new Error(`SKU "${data.sku}" sudah terdaftar pada produk "${existing.name}". Silakan gunakan SKU yang berbeda.`);
-        }
-
         const role = session ? session.role : data.userRole;
         if (role === 'gudang') data.price = 0;
 
         const ss = getDb();
         const prodSheet = ss.getSheetByName(SHEET_PRODUCTS);
+        
+        const productData = prodSheet.getDataRange().getValues();
+        let existing = false;
+        for (let i = 1; i < productData.length; i++) {
+            if (productData[i][1] === data.sku) {
+                existing = true;
+                break;
+            }
+        }
+        if (existing) throw new Error(`SKU "${data.sku}" sudah terdaftar.`);
+
         const batchSheet = ss.getSheetByName(SHEET_BATCHES);
         const historySheet = ss.getSheetByName(SHEET_PRICE_HISTORY);
 
@@ -675,7 +704,7 @@ function processUpdateProduct(data) {
         }
         if (rowIndex === -1) throw new Error("Produk tidak ditemukan.");
 
-        if (data.userRole === 'gudang') data.price = oldSell;
+        if (session.role === 'gudang') data.price = oldSell;
 
         if (oldBase !== data.basePrice || oldSell !== data.price) {
             const hSheet = ss.getSheetByName(SHEET_PRICE_HISTORY);
@@ -844,119 +873,117 @@ function processCheckout(data) {
 
     const { cart, total, customerId, amountPaid, paymentMethod } = data;
 
-    // Default payment method = cash jika tidak dikirim
     const method = paymentMethod || 'cash';
 
-    // Jika tunai, proses langsung (kurangi stok, simpan transaksi completed)
     if (method === 'cash') {
         return processCashCheckout(data, session);
     }
 
-    // Non-tunai
     if (session.role === 'admin') {
-        // Admin dianggap sudah menerima dana, langsung proses seperti tunai
         return processCashCheckout(data, session);
     } else {
-        // Kasir: buat transaksi pending tanpa mengurangi stok
         return processPendingNonCashCheckout(data, session);
     }
 }
 
-/**
- * Memproses checkout tunai (atau non-tunai oleh admin).
- */
 function processCashCheckout(data, session) {
+    const calculation = calculateCartTotals(data.cart);
+    const calculatedTotal = calculation.finalTotal;
+    
+    if (Math.abs(calculatedTotal - data.total) > 1) {
+        throw new Error("Terjadi ketidakcocokan total transaksi. Silakan refresh dan coba lagi.");
+    }
+
+    const finalTotal = calculatedTotal;
+    const paid = data.amountPaid || finalTotal;
+    const change = paid - finalTotal;
+    const txId = "TX" + new Date().getTime();
+    const date = new Date();
+    
     const lock = LockService.getScriptLock();
-    if (!lock.tryLock(25000)) throw new Error("Server Kasir sedang sibuk. Silakan coba lagi.");
+    if (!lock.tryLock(15000)) throw new Error("Server Kasir sedang sibuk. Silakan coba lagi.");
+    
+    let txRowInserted = false;
+    let detailsInsertedRange = null;
 
     try {
-        const calculation = calculateCartTotals(data.cart);
-        const calculatedTotal = calculation.finalTotal;
-
-        if (Math.abs(calculatedTotal - data.total) > 1) {
-            console.error(`Manipulasi total terdeteksi! Frontend: ${data.total}, Backend: ${calculatedTotal}`);
-            throw new Error("Terjadi ketidakcocokan total transaksi. Silakan refresh dan coba lagi.");
-        }
-
-        const finalTotal = calculatedTotal;
-        const promosApplied = calculation.promosApplied;
-        const validatedCart = calculation.validatedCart;
-
         const ss = getDb();
         const txSheet = ss.getSheetByName(SHEET_TRANSACTIONS);
         const detailSheet = ss.getSheetByName(SHEET_TX_DETAILS);
-        const promoSheet = ss.getSheetByName(SHEET_PROMOTIONS);
-
-        const txId = "TX" + new Date().getTime();
-        const date = new Date();
-
-        // Update kuota promosi
-        if (promosApplied.length > 0 && promoSheet) {
-            const promoData = promoSheet.getDataRange().getValues();
-            promosApplied.forEach(applied => {
-                for (let i = 1; i < promoData.length; i++) {
-                    if (promoData[i][0] === applied.id) {
-                        let currentUsed = parseInt(promoData[i][12]) || 0;
-                        let maxQuota = parseInt(promoData[i][11]) || 0;
-                        if (maxQuota > 0 && (currentUsed + applied.count) > maxQuota) {
-                            throw new Error(`Kuota promo "${promoData[i][1]}" telah habis.`);
-                        }
-                        promoData[i][12] = currentUsed + applied.count;
-                        promoSheet.getRange(i + 1, 13).setValue(promoData[i][12]);
-                        break;
-                    }
-                }
-            });
-            CacheService.getScriptCache().remove('promos_data');
-        }
-
-        // Kurangi stok (FIFO)
-        reduceStockFIFO(validatedCart);
-
-        const paid = data.amountPaid || finalTotal;
-        const change = paid - finalTotal;
-        const cashierId = session.userId;
-
-        // Simpan transaksi dengan status completed, PaymentMethod = cash
-        // Asumsi kolom: A=ID, B=Date, C=CashierID, D=Total, E=CustomerID, F=AmountPaid, G=Change, H=PaymentMethod, I=PaymentStatus
-        txSheet.appendRow([
-            txId, date, cashierId, finalTotal, data.customerId || "",
-            paid, change, 'cash', 'completed'
-        ]);
-
-        // Simpan detail transaksi
+        
+        const txRow = [txId, date, session.userId, finalTotal, data.customerId || "", paid, change, 'cash', 'completed'];
         let detailsRows = [];
-        validatedCart.forEach(item => {
+        
+        calculation.validatedCart.forEach(item => {
             detailsRows.push([Utilities.getUuid(), txId, item.id, item.qty, item.price, item.qty * item.price]);
         });
-
-        promosApplied.filter(p => p.type === 'BUY_X_GET_Y').forEach(p => {
+        
+        calculation.promosApplied.filter(p => p.type === 'BUY_X_GET_Y').forEach(p => {
             const rewardProduct = getProductBySku(p.rewardSku);
-            if (rewardProduct) {
-                const rewardQty = p.rewardQty * p.count;
-                detailsRows.push([Utilities.getUuid(), txId, rewardProduct.id, rewardQty, 0, 0]);
+            if (rewardProduct) detailsRows.push([Utilities.getUuid(), txId, rewardProduct.id, p.rewardQty * p.count, 0, 0]);
+        });
+
+        const productSheet = ss.getSheetByName(SHEET_PRODUCTS);
+        const prodData = productSheet.getDataRange().getValues();
+        
+        calculation.validatedCart.forEach(item => {
+            const dbProduct = prodData.find(row => row[0] === item.id);
+            if (!dbProduct || dbProduct[5] < item.qty) {
+                throw new Error(`Transaksi dibatalkan: Stok produk ${item.name} tidak mencukupi.`);
             }
         });
 
+        txSheet.appendRow(txRow); 
+        txRowInserted = true;
+        
         if (detailsRows.length > 0) {
-            detailSheet.getRange(detailSheet.getLastRow() + 1, 1, detailsRows.length, detailsRows[0].length).setValues(detailsRows);
+            const lastRow = detailSheet.getLastRow();
+            detailsInsertedRange = detailSheet.getRange(lastRow + 1, 1, detailsRows.length, detailsRows[0].length);
+            detailsInsertedRange.setValues(detailsRows);
         }
 
+        reduceStockFIFO(calculation.validatedCart);
+        
+        updatePromoQuotas(calculation.promosApplied);
         const profit = calculateTransactionProfit(txId);
         updateDailySummary(date, finalTotal, profit);
 
         CacheService.getScriptCache().remove('products_data');
+        CacheService.getScriptCache().remove('promos_data');
+        
         return { success: true, data: { receipt: txId, status: 'completed' } };
     } catch (err) {
+        try {
+            if (txRowInserted) {
+                const ss = getDb();
+                const txSheet = ss.getSheetByName(SHEET_TRANSACTIONS);
+                const txData = txSheet.getDataRange().getValues();
+                for (let i = txData.length - 1; i >= 1; i--) {
+                    if (txData[i][0] === txId) {
+                        txSheet.deleteRow(i + 1);
+                        break;
+                    }
+                }
+            }
+            if (detailsInsertedRange) {
+                const ss = getDb();
+                const detailSheet = ss.getSheetByName(SHEET_TX_DETAILS);
+                const detailData = detailSheet.getDataRange().getValues();
+                for (let i = detailData.length - 1; i >= 1; i--) {
+                    if (detailData[i][1] === txId) {
+                        detailSheet.deleteRow(i + 1);
+                    }
+                }
+            }
+        } catch (rollbackErr) {
+            console.error("Gagal melakukan rollback otomatis: ", rollbackErr.message);
+        }
         throw err;
     } finally {
         lock.releaseLock();
     }
 }
 
-/**
- * Memproses checkout non-tunai oleh kasir -> pending, stok belum berkurang.
- */
 function processPendingNonCashCheckout(data, session) {
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(15000)) throw new Error("Server sibuk. Gagal memproses transaksi.");
@@ -979,15 +1006,12 @@ function processPendingNonCashCheckout(data, session) {
         const txId = "TX" + new Date().getTime();
         const date = new Date();
 
-        // Simpan transaksi dengan status pending, stok TIDAK dikurangi
-        // PaymentMethod = non-cash, PaymentStatus = pending
         txSheet.appendRow([
             txId, date, session.userId, finalTotal, data.customerId || "",
             data.amountPaid || finalTotal, (data.amountPaid || finalTotal) - finalTotal,
             data.paymentMethod || 'non-cash', 'pending'
         ]);
 
-        // Simpan detail transaksi (untuk referensi)
         let detailsRows = [];
         validatedCart.forEach(item => {
             detailsRows.push([Utilities.getUuid(), txId, item.id, item.qty, item.price, item.qty * item.price]);
@@ -996,7 +1020,6 @@ function processPendingNonCashCheckout(data, session) {
             detailSheet.getRange(detailSheet.getLastRow() + 1, 1, detailsRows.length, detailsRows[0].length).setValues(detailsRows);
         }
 
-        // Buat permintaan konfirmasi
         createPaymentConfirmation(txId, session.userId, finalTotal, data.paymentMethod || 'non-cash');
 
         return { success: true, data: { receipt: txId, status: 'pending' } };
@@ -1007,11 +1030,6 @@ function processPendingNonCashCheckout(data, session) {
     }
 }
 
-// --- Fungsi Helper untuk Pembayaran Non-Tunai ---
-
-/**
- * Membuat record permintaan konfirmasi pembayaran non-tunai.
- */
 function createPaymentConfirmation(transactionId, cashierId, total, method) {
     const ss = getDb();
     const sheet = ss.getSheetByName(SHEET_PAYMENT_CONFIRMATIONS);
@@ -1031,10 +1049,6 @@ function createPaymentConfirmation(transactionId, cashierId, total, method) {
     return confId;
 }
 
-/**
- * Mengurangi stok berdasarkan item keranjang (FIFO).
- * Fungsi ini adalah ekstraksi dari processCashCheckout.
- */
 function reduceStockFIFO(cartItems) {
     const ss = getDb();
     const productSheet = ss.getSheetByName(SHEET_PRODUCTS);
@@ -1043,7 +1057,6 @@ function reduceStockFIFO(cartItems) {
     const batchData = batchSheet.getDataRange().getValues();
     const prodData = productSheet.getDataRange().getValues();
 
-    // Agregasi cart
     let aggregatedCart = {};
     cartItems.forEach(item => {
         if (!aggregatedCart[item.id]) {
@@ -1099,20 +1112,49 @@ function reduceStockFIFO(cartItems) {
         }
     }
 
-    // Terapkan update stok
-    batchUpdates.forEach(update => {
-        batchSheet.getRange(update.row, 6).setValue(update.newValue);
-    });
-    productStockUpdates.forEach(update => {
-        productSheet.getRange(update.row, 6).setValue(update.newStock);
-    });
+    if (batchData.length > 0) {
+        batchSheet.getRange(1, 1, batchData.length, batchData[0].length).setValues(batchData);
+    }
+    
+    if (prodData.length > 0) {
+        productSheet.getRange(1, 1, prodData.length, prodData[0].length).setValues(prodData);
+    }
 
+    SpreadsheetApp.flush();
     CacheService.getScriptCache().remove('products_data');
 }
 
-/**
- * Mengambil daftar konfirmasi yang masih pending.
- */
+function updatePromoQuotas(promosApplied) {
+    if (!promosApplied || promosApplied.length === 0) return;
+
+    const ss = getDb();
+    const promoSheet = ss.getSheetByName(SHEET_PROMOTIONS);
+    if (!promoSheet) return;
+
+    const promoData = promoSheet.getDataRange().getValues();
+    promosApplied.forEach(applied => {
+        for (let i = 1; i < promoData.length; i++) {
+            if (promoData[i][0] === applied.id) {
+                let currentUsed = parseInt(promoData[i][12]) || 0;
+                let maxQuota = parseInt(promoData[i][11]) || 0;
+                
+                if (maxQuota > 0 && (currentUsed + applied.count) > maxQuota) {
+                    throw new Error(`Kuota promo "${promoData[i][1]}" telah habis.`);
+                }
+                
+                promoData[i][12] = currentUsed + applied.count;
+                break;
+            }
+        }
+    });
+
+    if (promoData.length > 0) {
+        promoSheet.getRange(1, 1, promoData.length, promoData[0].length).setValues(promoData);
+    }
+
+    CacheService.getScriptCache().remove('promos_data');
+}
+
 function getPendingConfirmations() {
     const ss = getDb();
     const sheet = ss.getSheetByName(SHEET_PAYMENT_CONFIRMATIONS);
@@ -1128,16 +1170,13 @@ function getPendingConfirmations() {
                 cashierId: data[i][2],
                 total: data[i][3],
                 method: data[i][4],
-                requestTime: data[i][6],
+                requestTime: data[i][6] ? new Date(data[i][6]).toISOString() : null,
             });
         }
     }
     return { success: true, data: pending };
 }
 
-/**
- * Memproses konfirmasi (confirm/reject) oleh admin.
- */
 function processPaymentConfirmation(data) {
     const session = data.__session;
     if (!session || session.role !== 'admin') {
@@ -1155,7 +1194,6 @@ function processPaymentConfirmation(data) {
         const detailSheet = ss.getSheetByName(SHEET_TX_DETAILS);
         const promoSheet = ss.getSheetByName(SHEET_PROMOTIONS);
 
-        // Cari data konfirmasi
         const confData = confSheet.getDataRange().getValues();
         let confRow = -1, txId = null, total = 0;
         for (let i = 1; i < confData.length; i++) {
@@ -1171,7 +1209,6 @@ function processPaymentConfirmation(data) {
         }
         if (confRow === -1) throw new Error('Data konfirmasi tidak ditemukan.');
 
-        // Cari transaksi terkait
         const txData = txSheet.getDataRange().getValues();
         let txRow = -1;
         for (let i = 1; i < txData.length; i++) {
@@ -1185,7 +1222,6 @@ function processPaymentConfirmation(data) {
         const now = new Date();
 
         if (action === 'confirm') {
-            // Ambil detail transaksi untuk mengurangi stok
             const detailData = detailSheet.getDataRange().getValues();
             const cartItems = [];
             for (let i = 1; i < detailData.length; i++) {
@@ -1198,27 +1234,24 @@ function processPaymentConfirmation(data) {
                 }
             }
 
-            // Kurangi stok (FIFO)
-            reduceStockFIFO(cartItems);
+            try {
+                reduceStockFIFO(cartItems);
 
-            // Update status transaksi menjadi confirmed
-            // Asumsi kolom I = PaymentStatus (indeks 9, karena 1-based = 9)
-            txSheet.getRange(txRow, 9).setValue('confirmed');
+                txSheet.getRange(txRow, 9).setValue('confirmed');
 
-            // Update konfirmasi
-            confSheet.getRange(confRow, 6).setValue('confirmed');   // Status
-            confSheet.getRange(confRow, 8).setValue(now);           // ConfirmationTime
-            confSheet.getRange(confRow, 9).setValue(session.userId); // AdminID
-            if (notes) confSheet.getRange(confRow, 10).setValue(notes);
+                confSheet.getRange(confRow, 6).setValue('confirmed');   // Status
+                confSheet.getRange(confRow, 8).setValue(now);           // ConfirmationTime
+                confSheet.getRange(confRow, 9).setValue(session.userId); // AdminID
+                if (notes) confSheet.getRange(confRow, 10).setValue(notes);
 
-            const profit = calculateTransactionProfit(txId);
-            updateDailySummary(now, total, profit);
-
+                const profit = calculateTransactionProfit(txId);
+                updateDailySummary(now, total, profit);
+            } catch (err) {
+                throw new Error(`Gagal mengkonfirmasi pembayaran: ${err.message}.`);
+            }
         } else if (action === 'reject') {
-            // Update status transaksi menjadi rejected
             txSheet.getRange(txRow, 9).setValue('rejected');
 
-            // Update konfirmasi
             confSheet.getRange(confRow, 6).setValue('rejected');
             confSheet.getRange(confRow, 8).setValue(now);
             confSheet.getRange(confRow, 9).setValue(session.userId);
@@ -1227,7 +1260,6 @@ function processPaymentConfirmation(data) {
             throw new Error('Aksi tidak valid. Gunakan "confirm" atau "reject".');
         }
 
-        // Hapus cache produk karena stok berubah
         CacheService.getScriptCache().remove('products_data');
         return { success: true };
     } finally {
@@ -1286,7 +1318,7 @@ function generateReceiptHtml(transactionId) {
 
     let itemsHtml = '';
     items.forEach(item => {
-        const productName = productMap[item.productId] || 'Produk Tidak Dikenal';
+        const productName = escapeHtmlServer(productMap[item.productId] || 'Produk Tidak Dikenal');
         itemsHtml += `
       <tr>
         <td style="text-align:left;">${productName}</td>
@@ -1305,26 +1337,32 @@ function generateReceiptHtml(transactionId) {
 <head>
   <meta charset="UTF-8">
   <style>
-    @page { size: 105mm 148mm; margin: 0; }
-    body {
-      font-family: 'Courier New', monospace;
-      width: 105mm;
+    @page {
       margin: 0;
-      padding: 8mm 5mm;
-      box-sizing: border-box;
-      background: white;
-      color: black;
     }
-    .header { text-align: center; margin-bottom: 5mm; }
-    .store-name { font-size: 14pt; font-weight: bold; }
-    .store-info { font-size: 10pt; margin-top: 2mm; }
-    .divider { border-top: 1px dashed #000; margin: 3mm 0; }
-    table { width: 100%; border-collapse: collapse; font-size: 10pt; }
-    td { padding: 2px 0; }
+    body {
+      width: 58mm;
+      margin: 0 auto;
+      padding: 2mm;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      color: #000;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .text-left { text-align: left; }
+    .bold { font-weight: bold; }
+    .divider { border-top: 1px dashed #000; margin: 5px 0; }
+    .header { text-align: center; margin-bottom: 2mm; }
+    .store-name { font-size: 14px; font-weight: bold; }
+    .store-info { font-size: 10px; margin-top: 1mm; }
+    .footer { text-align: center; margin-top: 4mm; font-size: 10px; }
     .right { text-align: right; }
-    .total-row { font-weight: bold; font-size: 12pt; margin-top: 3mm; }
-    .footer { text-align: center; margin-top: 5mm; font-size: 9pt; }
-    .thankyou { margin-top: 3mm; }
   </style>
 </head>
 <body>
@@ -1384,16 +1422,36 @@ function sendInvoiceEmail(data) {
         throw new Error("Alamat email tidak valid.");
     }
 
+    const settingsRes = getSettings();
+    const settings = settingsRes.success ? settingsRes.data : getDefaultSettings();
+
     const htmlContent = generateReceiptHtml(transactionId);
     const blob = Utilities.newBlob(htmlContent, 'text/html', `Invoice_${transactionId}.html`);
     const pdf = blob.getAs('application/pdf').setName(`Invoice_${transactionId}.pdf`);
 
-    const subject = `Invoice Transaksi ${transactionId}`;
-    const body = "Terima kasih telah berbelanja. Berikut terlampir invoice pembelian Anda.";
+    const subject = `Invoice Transaksi ${transactionId} - ${settings.storeName}`;
+    const body = `Halo,\n\nTerima kasih telah berbelanja di ${settings.storeName}. Berikut terlampir invoice pembelian Anda untuk transaksi ${transactionId}.\n\nSalam,\n${settings.storeName}`;
 
     GmailApp.sendEmail(email, subject, body, {
         attachments: [pdf],
-        name: "Sistem Kasir"
+        name: settings.storeName,
+        htmlBody: `
+            <div style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; rounded-xl: 12px;">
+                <h2 style="color: #059669; border-bottom: 2px solid #059669; padding-bottom: 10px;">Invoice Transaksi ${transactionId}</h2>
+                <p>Halo,</p>
+                <p>Terima kasih telah berbelanja di <b>${settings.storeName}</b>. Kami menghargai kepercayaan Anda.</p>
+                <p>Silakan temukan rincian lengkap pembelian Anda pada lampiran PDF yang tersedia dalam email ini.</p>
+                <div style="margin-top: 30px; padding: 15px; background-color: #f8fafc; border-radius: 8px;">
+                    <p style="margin: 0; font-weight: bold;">Salam hangat,</p>
+                    <p style="margin: 5px 0 0 0;">${settings.storeName}</p>
+                </div>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0 20px 0;">
+                <p style="font-size: 12px; color: #64748b; text-align: center;">
+                    ${settings.storeAddress} <br>
+                    ${settings.storeContact}
+                </p>
+            </div>
+        `
     });
 
     return { success: true, message: "Email berhasil dikirim." };
@@ -1613,10 +1671,6 @@ function getDashboardData() {
     return { success: true, data: { expiringSoon, chartData: Object.values(salesData) } };
 }
 
-/**
- * Mendapatkan map harga modal produk (basePrice) dari sheet Products.
- * @returns {Object} Map dengan key productId dan value basePrice.
- */
 function getProductCostMap() {
     const cache = CacheService.getScriptCache();
     const cached = cache.get('product_cost_map');
@@ -1633,11 +1687,6 @@ function getProductCostMap() {
     return map;
 }
 
-/**
- * Menghitung total profit dari detail transaksi.
- * @param {string} txId - ID transaksi.
- * @returns {number} Total profit (omzet - total modal).
- */
 function calculateTransactionProfit(txId) {
     const ss = getDb();
     const detailSheet = ss.getSheetByName(SHEET_TX_DETAILS);
@@ -1665,11 +1714,9 @@ function generateReport(data) {
     const { type, startDate, endDate } = data;
     const tz = Session.getScriptTimeZone();
 
-    // Default periode: bulan berjalan
     const now = new Date();
     const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
     const end = endDate ? new Date(endDate) : now;
-    // Set endDate ke akhir hari
     end.setHours(23, 59, 59, 999);
 
     let html = '';
@@ -1701,8 +1748,8 @@ function generateStockReport() {
     let totalValue = 0;
     for (let i = 1; i < data.length; i++) {
         const p = data[i];
-        const sku = p[1] || '-';
-        const name = p[2] || '-';
+        const sku = escapeHtmlServer(p[1] || '-');
+        const name = escapeHtmlServer(p[2] || '-');
         const stock = parseInt(p[5]) || 0;
         const basePrice = parseFloat(p[3]) || 0;
         const sellPrice = parseFloat(p[4]) || 0;
@@ -1756,37 +1803,50 @@ function generateStockReport() {
 function generateTransactionsReport(start, end, tz) {
     const ss = getDb();
     const txSheet = ss.getSheetByName(SHEET_TRANSACTIONS);
-    const data = txSheet.getDataRange().getValues();
+    const detailSheet = ss.getSheetByName(SHEET_TX_DETAILS);
     const settings = getSettings().data;
 
+    const detailData = detailSheet.getDataRange().getValues();
+    const costMap = getProductCostMap(); // dari cache
+
+    const profitMap = {}; // txId -> profit
+    for (let i = 1; i < detailData.length; i++) {
+        const txId = detailData[i][1];
+        const productId = detailData[i][2];
+        const qty = detailData[i][3] || 0;
+        const subtotal = detailData[i][5] || 0;
+        const cost = (costMap[productId] || 0) * qty;
+        const margin = subtotal - cost;
+        profitMap[txId] = (profitMap[txId] || 0) + margin;
+    }
+
+    const txData = txSheet.getDataRange().getValues();
     let rows = '';
     let totalRevenue = 0, totalProfit = 0, totalTx = 0;
 
-    // Asumsi kolom: A=ID, B=Date, C=CashierID, D=Total, E=CustomerID, F=Paid, G=Change, H=Method, I=Status
-    for (let i = 1; i < data.length; i++) {
-        const tx = data[i];
+    for (let i = 1; i < txData.length; i++) {
+        const tx = txData[i];
         const txDate = new Date(tx[1]);
         if (txDate < start || txDate > end) continue;
-
-        const status = tx[8]; // kolom I
-        // Hanya transaksi yang sudah selesai (completed/confirmed)
+        const status = tx[8];
         if (status !== 'completed' && status !== 'confirmed') continue;
 
         const txId = tx[0];
         const total = parseFloat(tx[3]) || 0;
-        const profit = calculateTransactionProfit(txId);
+        const profit = profitMap[txId] || 0;
+
         totalRevenue += total;
         totalProfit += profit;
         totalTx++;
 
         rows += `<tr>
-      <td>${txId}</td>
+      <td>${escapeHtmlServer(txId)}</td>
       <td>${Utilities.formatDate(txDate, tz, "dd/MM/yyyy HH:mm")}</td>
-      <td>${tx[2]}</td>
+      <td>${escapeHtmlServer(tx[2])}</td>
       <td class="text-right">${formatRupiah(total)}</td>
       <td class="text-right">${formatRupiah(profit)}</td>
-      <td>${tx[7] || 'cash'}</td>
-      <td>${status}</td>
+      <td>${escapeHtmlServer(tx[7] || 'cash')}</td>
+      <td>${escapeHtmlServer(status)}</td>
     </tr>`;
     }
 
@@ -1848,15 +1908,14 @@ function generateCashflowReport(start, end, tz) {
         const total = parseFloat(tx[3]) || 0;
         totalIncome += total;
         detailsHtml += `<tr>
-      <td>${tx[0]}</td>
+      <td>${escapeHtmlServer(tx[0])}</td>
       <td>${Utilities.formatDate(txDate, tz, "dd/MM/yyyy")}</td>
-      <td>${tx[2]}</td>
+      <td>${escapeHtmlServer(tx[2])}</td>
       <td class="text-right">${formatRupiah(total)}</td>
-      <td>${tx[7] || 'cash'}</td>
+      <td>${escapeHtmlServer(tx[7] || 'cash')}</td>
     </tr>`;
     }
 
-    // Untuk pengeluaran, bisa ditambahkan sheet terpisah nanti. Saat ini set ke 0.
     const totalExpense = 0;
     const netCashflow = totalIncome - totalExpense;
 
@@ -2006,4 +2065,82 @@ function initializeDatabase() {
     } catch (e) { }
 
     return successMessage;
+}
+
+function resetPasswordByAdmin() {
+    const ui = SpreadsheetApp.getUi();
+    const response = ui.prompt('Reset Password', 'Masukkan ID User (contoh: U001):', ui.ButtonSet.OK_CANCEL);
+    if (response.getSelectedButton() != ui.Button.OK) return;
+
+    const userId = response.getResponseText().trim();
+    const ss = getDb();
+    const sheet = ss.getSheetByName(SHEET_USERS);
+    const data = sheet.getDataRange().getValues();
+
+    for (let i = 1; i < data.length; i++) {
+        if (data[i][0] === userId) {
+            const newPassword = 'admin123'; // Ganti sesuai kebijakan Anda
+            const salt = generateSalt();
+            const hashed = hashPassword(newPassword, salt);
+            sheet.getRange(i + 1, 3).setValue(hashed); // Kolom C (PasswordHash)
+            sheet.getRange(i + 1, 5).setValue(salt);    // Kolom E (Salt)
+            ui.alert(`Password user ${data[i][1]} berhasil direset ke "${newPassword}".`);
+            return;
+        }
+    }
+    ui.alert('User ID tidak ditemukan.');
+}
+
+function escapeHtmlServer(unsafe) {
+    if (unsafe == null) return '';
+    return String(unsafe)
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+}
+
+function checkConfirmedPayments(data) {
+    const session = data.__session;
+    if (!session || session.role !== 'kasir') return { success: true, data: [] };
+
+    const ss = getDb();
+    const sheet = ss.getSheetByName(SHEET_PAYMENT_CONFIRMATIONS);
+    if (!sheet) return { success: true, data: [] };
+
+    const records = sheet.getDataRange().getValues();
+    const unnotified = [];
+
+    for (let i = 1; i < records.length; i++) {
+        // Kolom C [2]: CashierID, Kolom F [5]: Status, Kolom K [10]: NotifiedFlag
+        if (records[i][2] === session.userId && records[i][5] === 'confirmed' && records[i][10] !== 'yes') {
+            unnotified.push({
+                confirmationId: records[i][0],
+                transactionId: records[i][1],
+            });
+        }
+    }
+    return { success: true, data: unnotified };
+}
+
+function processMarkAsNotified(data) {
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(10000)) return { success: false, error: "Sibuk" };
+
+    try {
+        const ss = getDb();
+        const sheet = ss.getSheetByName(SHEET_PAYMENT_CONFIRMATIONS);
+        const records = sheet.getDataRange().getValues();
+
+        for (let i = 1; i < records.length; i++) {
+            if (records[i][0] === data.confirmationId) {
+                sheet.getRange(i + 1, 11).setValue('yes'); // Tandai kolom K (11) sebagai 'yes'
+                break;
+            }
+        }
+        return { success: true };
+    } finally {
+        lock.releaseLock();
+    }
 }
