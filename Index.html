@@ -19,6 +19,10 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
+    <!-- Thermal Printer -->
+    <script src="https://cdn.jsdelivr.net/npm/@point-of-sale/receipt-printer-encoder@3.0.3/dist/receipt-printer-encoder.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@point-of-sale/webbluetooth-receipt-printer@2.0.0/dist/webbluetooth-receipt-printer.umd.js"></script>
+
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 
@@ -63,6 +67,12 @@
 
     <style>
         /* Custom Global Styles */
+        .h-screen-dynamic {
+            height: calc(var(--vh, 1vh) * 100);
+        }
+        .min-h-screen-dynamic {
+            min-height: calc(var(--vh, 1vh) * 100);
+        }
         body {
             background-color: #f8fafc;
             color: #1e293b;
@@ -141,6 +151,7 @@
 
         @media (max-width: 1024px) {
             .cart-panel-layout {
+                max-height: calc(var(--vh, 1vh) * 85);
                 position: fixed;
                 bottom: 0;
                 left: 0;
@@ -771,6 +782,18 @@
             </div>
             <div class="p-4 border-t border-slate-100 flex flex-wrap justify-end gap-3 bg-slate-50">
 
+                <!-- Tombol Hubungkan Printer -->
+                <button id="btn-connect-printer" onclick="connectPrinter()"
+                        class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2.5 rounded-xl font-bold transition flex items-center gap-2">
+                    <i class="ph-bold ph-link"></i> Hubungkan Printer Bluetooth
+                </button>
+
+                <!-- Tombol Cetak Thermal -->
+                <button id="btn-print-thermal" onclick="printThermalReceipt(lastThermalReceiptData)" disabled
+                        class="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 text-white px-4 py-2.5 rounded-xl font-bold transition flex items-center gap-2">
+                    <i class="ph-bold ph-printer"></i> Cetak Thermal (Bluetooth)
+                </button>
+
                 <button onclick="printReceiptA6(currentDetailTxId)"
                     class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold transition flex items-center gap-2">
                     <i class="ph-bold ph-printer"></i> Cetak Struk
@@ -784,7 +807,7 @@
     </div>
 
     <div id="login-view"
-        class="min-h-screen bg-gradient-to-br from-slate-100 to-slate-300 flex items-center justify-center p-4 relative overflow-hidden">
+        class="min-h-screen-dynamic bg-gradient-to-br from-slate-100 to-slate-300 flex items-center justify-center p-4 relative overflow-hidden">
         <div
             class="absolute top-[-10%] left-[-10%] w-96 h-96 bg-primary/20 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob">
         </div>
@@ -832,7 +855,7 @@
         </div>
     </div>
 
-    <div id="app-view" class="flex w-full h-screen bg-slate-50 overflow-hidden" style="display: none;">
+    <div id="app-view" class="flex w-full h-screen-dynamic bg-slate-50 overflow-hidden" style="display: none;">
 
         <!-- SIDEBAR (DESKTOP) -->
         <aside class="hidden lg:flex flex-col w-[260px] bg-white border-r border-slate-200 h-full z-20">
@@ -846,50 +869,53 @@
             </div>
 
             <nav class="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
+                <!-- ===== MENU UMUM (KASIR, GUDANG, ADMIN) ===== -->
                 <button data-tab-target="pos" onclick="switchTab('pos')"
                     class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
-                    <i class="ph-fill ph-calculator text-xl"></i> Menu Kasir
-                </button>
-                <button data-tab-target="customers" onclick="switchTab('customers')"
-                    class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
-                    <i class="ph-fill ph-users-three text-xl"></i> Pelanggan
-                </button>
-                <button data-tab-target="inventory" onclick="switchTab('inventory')"
-                    class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
-                    <i class="ph-fill ph-package text-xl"></i> Inventaris
-                </button>
-                <button data-tab-target="promo" onclick="switchTab('promo')"
-                    class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
-                    <i class="ph-fill ph-tag text-xl"></i> Promo
+                    <i class="ph-fill ph-calculator text-xl"></i> Kasir (POS)
                 </button>
                 <button data-tab-target="history" onclick="switchTab('history')"
                     class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
                     <i class="ph-fill ph-clock-counter-clockwise text-xl"></i> Riwayat Transaksi
                 </button>
-
-                <button data-tab-target="confirmations" onclick="switchTab('confirmations')"
+                <button data-tab-target="customers" onclick="switchTab('customers')"
                     class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
-                    <i class="ph-fill ph-check-square text-xl"></i> Konfirmasi Bayar
+                    <i class="ph-fill ph-users-three text-xl"></i> Data Pelanggan
                 </button>
 
-                <button data-tab-target="reports" onclick="switchTab('reports')"
+                <!-- ===== GUDANG / INVENTARIS ===== -->
+                <button data-tab-target="inventory" onclick="switchTab('inventory')"
                     class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
-                    <i class="ph-fill ph-file-text text-xl"></i> Laporan
+                    <i class="ph-fill ph-package text-xl"></i> Produk & Stok
                 </button>
 
+                <!-- Divider Admin -->
                 <div class="my-4 border-t border-slate-100 hidden admin-only-divider"></div>
 
+                <!-- ===== ADMIN ONLY ===== -->
                 <button data-tab-target="dashboard" onclick="switchTab('dashboard')"
                     class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
-                    <i class="ph-fill ph-chart-line-up text-xl"></i> Laporan
+                    <i class="ph-fill ph-chart-line-up text-xl"></i> Dashboard
+                </button>
+                <button data-tab-target="promo" onclick="switchTab('promo')"
+                    class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
+                    <i class="ph-fill ph-tag text-xl"></i> Promo
+                </button>
+                <button data-tab-target="reports" onclick="switchTab('reports')"
+                    class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
+                    <i class="ph-fill ph-file-text text-xl"></i> Cetak Laporan
+                </button>
+                <button data-tab-target="confirmations" onclick="switchTab('confirmations')"
+                    class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
+                    <i class="ph-fill ph-check-square text-xl"></i> Konfirmasi Pembayaran
                 </button>
                 <button data-tab-target="users" onclick="switchTab('users')"
                     class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
-                    <i class="ph-fill ph-users text-xl"></i> Pengguna
+                    <i class="ph-fill ph-users text-xl"></i> Manajemen Pengguna
                 </button>
                 <button data-tab-target="settings" onclick="switchTab('settings')"
                     class="nav-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-semibold transition-all hidden">
-                    <i class="ph-fill ph-gear text-xl"></i> Pengaturan
+                    <i class="ph-fill ph-gear text-xl"></i> Pengaturan Toko
                 </button>
             </nav>
 
@@ -1505,6 +1531,11 @@
                 <i class="ph-fill ph-calculator text-2xl sm:text-3xl"></i>
                 <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Kasir</span>
             </button>
+            <button data-tab-target="history" onclick="switchTab('history')"
+                class="nav-btn flex-1 min-w-[75px] min-h-[64px] flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-colors hidden">
+                <i class="ph-fill ph-clock-counter-clockwise text-2xl sm:text-3xl"></i>
+                <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Riwayat</span>
+            </button>
             <button data-tab-target="customers" onclick="switchTab('customers')"
                 class="nav-btn flex-1 min-w-[75px] min-h-[64px] flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-colors hidden">
                 <i class="ph-fill ph-users-three text-2xl sm:text-3xl"></i>
@@ -1513,32 +1544,27 @@
             <button data-tab-target="inventory" onclick="switchTab('inventory')"
                 class="nav-btn flex-1 min-w-[75px] min-h-[64px] flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-colors hidden">
                 <i class="ph-fill ph-package text-2xl sm:text-3xl"></i>
-                <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Gudang</span>
+                <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Stok</span>
+            </button>
+            <button data-tab-target="dashboard" onclick="switchTab('dashboard')"
+                class="nav-btn flex-1 min-w-[75px] min-h-[64px] flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-colors hidden">
+                <i class="ph-fill ph-chart-line-up text-2xl sm:text-3xl"></i>
+                <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Dashboard</span>
             </button>
             <button data-tab-target="promo" onclick="switchTab('promo')"
                 class="nav-btn flex-1 min-w-[75px] min-h-[64px] flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-colors hidden">
                 <i class="ph-fill ph-tag text-2xl sm:text-3xl"></i>
                 <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Promo</span>
             </button>
-            <button data-tab-target="history" onclick="switchTab('history')"
-                class="nav-btn flex-1 min-w-[75px] min-h-[64px] flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-colors hidden">
-                <i class="ph-fill ph-clock-counter-clockwise text-2xl sm:text-3xl"></i>
-                <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Riwayat</span>
-            </button>
-            <button data-tab-target="confirmations" onclick="switchTab('confirmations')"
-                class="nav-btn flex-1 min-w-[75px] min-h-[64px] flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-colors hidden">
-                <i class="ph-fill ph-check-square text-2xl sm:text-3xl"></i>
-                <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Konfirmasi</span>
-            </button>
             <button data-tab-target="reports" onclick="switchTab('reports')"
                 class="nav-btn flex-1 min-w-[75px] min-h-[64px] flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-colors hidden">
                 <i class="ph-fill ph-file-text text-2xl sm:text-3xl"></i>
                 <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Laporan</span>
             </button>
-            <button data-tab-target="dashboard" onclick="switchTab('dashboard')"
+            <button data-tab-target="confirmations" onclick="switchTab('confirmations')"
                 class="nav-btn flex-1 min-w-[75px] min-h-[64px] flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-colors hidden">
-                <i class="ph-fill ph-chart-line-up text-2xl sm:text-3xl"></i>
-                <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Laporan</span>
+                <i class="ph-fill ph-check-square text-2xl sm:text-3xl"></i>
+                <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Konfirmasi</span>
             </button>
             <button data-tab-target="users" onclick="switchTab('users')"
                 class="nav-btn flex-1 min-w-[75px] min-h-[64px] flex flex-col items-center justify-center gap-1 py-3 px-1 rounded-xl transition-colors hidden">
@@ -1598,6 +1624,260 @@
         let currentCheckoutTotal = 0;
         let currentDetailTxId = null;
         let searchTimeout = null;
+
+        // ================== OPTIMASI MOBILE VIEWPORT ==================
+        function setViewportHeight() {
+            const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+            document.documentElement.style.setProperty('--vh', `${vh * 0.01}px`);
+        }
+
+        window.addEventListener('resize', setViewportHeight);
+        window.addEventListener('orientationchange', setViewportHeight);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', setViewportHeight);
+            window.visualViewport.addEventListener('scroll', setViewportHeight);
+        }
+        setViewportHeight();
+
+        // ================== PRINTER THERMAL SETUP ==================
+        const PRINTER_STORAGE_KEY = 'pos_printer_v2';
+        const RECEIPT_COLUMNS_DEFAULT = 32;
+        const RECEIPT_COLUMNS_SUPPORTED = { 32: true, 35: true, 42: true, 44: true, 48: true };
+        const SUPPORTED_CODEPAGE_MAPPINGS = {
+            'epson': true, 'xprinter': true, 'pos-5890': true,
+            'mpt': true, 'star': true, 'bixolon': true, 'citizen': true
+        };
+        const CODEPAGE_ALIASES = {
+            'zjiang': 'pos-5890',
+            'epsonlegacy': 'epson'
+        };
+
+        let receiptPrinter = null;
+        let printerSettings = null;        // { language, codepageMapping, columns }
+        let isPrinterConnected = false;
+        let isConnecting = false;
+        let lastThermalReceiptData = null; // data transaksi terakhir untuk cetak ulang
+
+        function normalizePrinterLanguage(lang) {
+            const s = String(lang || '').toLowerCase();
+            if (s === 'star-prnt' || s === 'star-line') return s;
+            return 'esc-pos';
+        }
+
+        function normalizeCodepageMapping(mapping) {
+            if (typeof mapping === 'object') return mapping; // custom object
+            const key = CODEPAGE_ALIASES[String(mapping || '').toLowerCase()] || mapping;
+            return SUPPORTED_CODEPAGE_MAPPINGS[key] ? key : '';
+        }
+
+        function normalizeColumns(v) {
+            const n = parseInt(v);
+            return RECEIPT_COLUMNS_SUPPORTED[n] ? n : 0;
+        }
+
+        function getReceiptColumns() {
+            return printerSettings?.columns || RECEIPT_COLUMNS_DEFAULT;
+        }
+
+        function rememberPrinter(device) {
+            const data = {
+                id: device.id,
+                name: device.name,
+                language: normalizePrinterLanguage(device.language),
+                codepageMapping: device.codepageMapping,
+                columns: device.columns
+            };
+            localStorage.setItem(PRINTER_STORAGE_KEY, JSON.stringify(data));
+        }
+
+        function setupBluetoothPrinter() {
+            if (typeof WebBluetoothReceiptPrinter === 'undefined') {
+                console.warn('Library WebBluetoothReceiptPrinter tidak ditemukan');
+                return;
+            }
+            if (typeof ReceiptPrinterEncoder === 'undefined') {
+                console.warn('Library ReceiptPrinterEncoder tidak ditemukan');
+                return;
+            }
+            receiptPrinter = new WebBluetoothReceiptPrinter();
+
+            // Baca data printer terakhir dari localStorage untuk UI
+            try {
+                const saved = localStorage.getItem(PRINTER_STORAGE_KEY);
+                if (saved) {
+                    const savedData = JSON.parse(saved);
+                    // Hanya untuk menampilkan nama terakhir, bukan auto-connect
+                    if (savedData.name) {
+                        printerSettings = printerSettings || {};
+                        printerSettings.lastKnownName = savedData.name;
+                    }
+                }
+            } catch(e) { /* ignore parse error */ }
+
+            receiptPrinter.addEventListener('connected', (event) => {
+                const device = event.detail || event;
+                printerSettings = {
+                    name: device.name || 'Tanpa Nama',
+                    language: normalizePrinterLanguage(device.language),
+                    codepageMapping: normalizeCodepageMapping(device.codepageMapping),
+                    columns: normalizeColumns(device.columns)
+                };
+                isPrinterConnected = true;
+                isConnecting = false;
+                rememberPrinter(device);
+                updatePrinterButtons();
+                showToast(`Printer tersambung: ${device.name || 'Tanpa Nama'}`);
+            });
+
+            receiptPrinter.addEventListener('disconnected', () => {
+                printerSettings = null;
+                isPrinterConnected = false;
+                isConnecting = false;
+                updatePrinterButtons();
+                showToast('Printer terputus', 'error');
+            });
+        }
+
+        async function connectPrinter() {
+            if (!isSecureContext) {
+                return alert('Bluetooth hanya bisa di HTTPS. Buka URL deploy Web App.');
+            }
+            if (window.top !== window.self) {
+                return alert('Buka aplikasi di tab browser langsung, bukan dari dalam editor.');
+            }
+            if (!navigator.bluetooth) {
+                return alert('Browser tidak mendukung Web Bluetooth. Gunakan Chrome Android terbaru.');
+            }
+
+            if (!receiptPrinter) {
+                setupBluetoothPrinter();
+            }
+
+            if (isConnecting) return;
+            isConnecting = true;
+            updatePrinterButtons();
+
+            try {
+                await receiptPrinter.connect();
+                // event 'connected' akan menangani sisanya
+            } catch (err) {
+                isConnecting = false;
+                updatePrinterButtons();
+                showToast('Gagal hubungkan printer: ' + err.message, 'error');
+            }
+        }
+
+        function updatePrinterButtons() {
+            const connectBtn = document.getElementById('btn-connect-printer');
+            const printBtn = document.getElementById('btn-print-thermal');
+            if (connectBtn) {
+                connectBtn.disabled = isConnecting;
+                connectBtn.innerHTML = isConnecting
+                    ? '<i class="ph-bold ph-spinner animate-spin mr-1"></i> Menghubungkan...'
+                    : isPrinterConnected
+                        ? `<i class="ph-bold ph-link mr-1"></i> Printer: ${printerSettings?.name || 'Ready'}`
+                        : '<i class="ph-bold ph-link mr-1"></i> Hubungkan Printer Bluetooth';
+            }
+            if (printBtn) {
+                printBtn.disabled = !isPrinterConnected || !lastThermalReceiptData;
+            }
+        }
+
+        function createEncoderWithFallback(columns) {
+            const lang = printerSettings?.language || 'esc-pos';
+            const cp = printerSettings?.codepageMapping;
+            const attempts = [];
+
+            if (cp) attempts.push({ language: lang, columns, codepageMapping: cp });
+            // Fallback umum untuk ESC/POS
+            attempts.push({ language: lang, columns, codepageMapping: 'epson' });
+            attempts.push({ language: lang, columns });
+            attempts.push({ columns });
+
+            let lastError;
+            for (const opt of attempts) {
+                try {
+                    return new ReceiptPrinterEncoder(opt);
+                } catch (e) {
+                    lastError = e;
+                    if (!/unknown codepage mapping/i.test(e.message)) throw e;
+                }
+            }
+            throw lastError || new Error('Tidak dapat membuat encoder printer');
+        }
+
+        function formatLine(left, right, width) {
+            const r = String(right).padStart(Math.max(1, width - left.length));
+            return left + r;
+        }
+
+        function buildThermalData(tx) {
+            const width = getReceiptColumns();
+            const encoder = createEncoderWithFallback(width);
+
+            encoder
+                .initialize()
+                .align('center')
+                .bold(true)
+                .line(state.settings?.storeName || 'Toko')
+                .bold(false)
+                .line('Struk Pembayaran')
+                .newline()
+                .align('left')
+                .line(`No: ${tx.id}`)
+                .line(`Tgl : ${tx.date}`)
+                .line(`Kasir: ${tx.cashier}`)
+                .line('-'.repeat(width));
+
+            tx.items.forEach(item => {
+                const left = `${item.productName} (${item.qty})`;
+                const right = `Rp ${item.subtotal.toLocaleString('id-ID')}`;
+                encoder.line(formatLine(left, right, width));
+            });
+
+            encoder
+                .line('-'.repeat(width))
+                .bold(true)
+                .line(formatLine('TOTAL', `Rp ${tx.total.toLocaleString('id-ID')}`, width))
+                .bold(false)
+                .line(formatLine('Bayar', `Rp ${tx.amountPaid.toLocaleString('id-ID')}`, width))
+                .line(formatLine('Kembali', `Rp ${tx.change.toLocaleString('id-ID')}`, width))
+                .newline()
+                .align('center')
+                .line('Terima kasih')
+                .cut();
+
+            return encoder.encode();
+        }
+
+        async function printThermalReceipt(tx) {
+            if (!tx) {
+                showToast('Tidak ada data transaksi untuk dicetak', 'error');
+                return;
+            }
+            if (!isPrinterConnected || !receiptPrinter) {
+                showToast('Printer belum terhubung. Silakan sambungkan dulu.', 'error');
+                return;
+            }
+
+            toggleLoader(true, 'Mencetak struk...');
+            try {
+                const data = buildThermalData(tx);
+                await receiptPrinter.print(data);
+                showToast('Struk berhasil dikirim ke printer thermal');
+            } catch (err) {
+                console.error(err);
+                showToast('Gagal mencetak: ' + err.message, 'error');
+                if (/messageSize/i.test(err.message)) {
+                    // Kemungkinan printer disconnect
+                    isPrinterConnected = false;
+                    printerSettings = null;
+                    updatePrinterButtons();
+                }
+            } finally {
+                toggleLoader(false);
+            }
+        }
 
 
         const formatRp = (num) => {
@@ -1734,7 +2014,7 @@
             toggleLoader(true, 'Mengirim email...');
             try {
                 const res = await apiCall('sendInvoiceEmail', { transactionId, email });
-                showToast(res.message || 'Email berhasil dikirim!');
+                showToast(res || 'Email berhasil dikirim!');
             } catch (err) {
                 showToast('Gagal mengirim email: ' + err, 'error');
             } finally {
@@ -1762,6 +2042,7 @@
 
             if (token && savedUser) {
                 try {
+                    setupBluetoothPrinter();
                     await apiCall('getProducts');
                     state.user = JSON.parse(savedUser);
                     showView('app');
@@ -1933,6 +2214,7 @@
                 state.user = user;
                 e.target.reset();
                 showView('app');
+                setupBluetoothPrinter();
                 setTimeout(() => {
                     setupUserRole();
                     showToast('Berhasil masuk!');
@@ -3031,6 +3313,25 @@
             try {
                 const res = await getTxDetailData(transactionId);
                 renderTransactionDetail(res);
+
+                // Populate lastThermalReceiptData dari detail untuk cetak thermal
+                const { header, items } = res;
+                lastThermalReceiptData = {
+                    id: header.id,
+                    date: header.formattedDate || new Date(header.date).toLocaleString('id-ID'),
+                    cashier: header.cashier || 'N/A',
+                    total: header.total,
+                    amountPaid: header.amountPaid,
+                    change: header.change,
+                    items: items.map(item => ({
+                        productName: item.productName,
+                        qty: item.qty,
+                        price: item.price,
+                        subtotal: item.subtotal
+                    }))
+                };
+                updatePrinterButtons();
+
                 toggleTransactionDetailModal(true);
             } catch (err) {
                 showToast('Gagal memuat detail: ' + err, 'error');
@@ -3089,6 +3390,13 @@
                 document.getElementById('pay-total-display').innerText = formatRp(currentCheckoutTotal);
                 const amtInput = document.getElementById('pay-amount-input');
                 if (amtInput) amtInput.value = currentCheckoutTotal;
+
+                // Reset payment method ke cash dan tampilkan tunai section
+                const cashRadio = document.querySelector('input[name="payment-method"][value="cash"]');
+                if (cashRadio) cashRadio.checked = true;
+                const tunaiSection = document.getElementById('tunai-input-section');
+                if (tunaiSection) tunaiSection.style.display = 'block';
+
                 calculateChange();
                 togglePaymentModal(true);
             } catch (err) {
@@ -3115,14 +3423,35 @@
             }
         };
 
+        // Handler untuk toggle visibilitas input tunai
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('input[name="payment-method"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    const tunaiSection = document.getElementById('tunai-input-section');
+                    if (tunaiSection) {
+                        if (e.target.value === 'cash') {
+                            tunaiSection.style.display = 'block';
+                        } else {
+                            tunaiSection.style.display = 'none';
+                        }
+                    }
+                });
+            });
+        });
+
         const executeCheckout = async () => {
             const paymentMethodElem = document.querySelector('input[name="payment-method"]:checked');
             const paymentMethod = paymentMethodElem ? paymentMethodElem.value : 'cash';
 
-            const amountPaid = parseInt(document.getElementById('pay-amount-input')?.value) || 0;
-            if (paymentMethod === 'cash' && amountPaid < currentCheckoutTotal) {
-                showToast("Uang tunai yang diterima kurang!", "error");
-                return;
+            let amountPaid = parseInt(document.getElementById('pay-amount-input')?.value) || 0;
+            if (paymentMethod === 'cash') {
+                if (amountPaid < currentCheckoutTotal) {
+                    showToast("Uang tunai yang diterima kurang!", "error");
+                    return;
+                }
+            } else {
+                // Non-cash: amountPaid = total tagihan (input tunai disembunyikan)
+                amountPaid = currentCheckoutTotal;
             }
 
             togglePaymentModal(false);
@@ -3144,6 +3473,23 @@
 
                 const txId = res.receipt;
                 const status = res.status || 'completed';
+
+                // Simpan data untuk cetak thermal
+                lastThermalReceiptData = {
+                    id: txId,
+                    date: new Date().toLocaleString('id-ID'),
+                    cashier: state.user?.username || 'Admin',
+                    total: currentCheckoutTotal,
+                    amountPaid: amountPaid,
+                    change: amountPaid - currentCheckoutTotal,
+                    items: state.computed.uiCart.filter(i => !i.isPromo).map(item => ({
+                        productName: item.name,
+                        qty: item.qty,
+                        price: item.price,
+                        subtotal: item.qty * item.price
+                    }))
+                };
+                updatePrinterButtons();
 
                 if (status === 'pending') {
                     showToast('Transaksi non-tunai menunggu konfirmasi admin.', 'success');
@@ -3275,8 +3621,9 @@
         const confirmPaymentAction = async (confirmationId, action) => {
             let notes = '';
             if (action === 'reject') {
-                notes = prompt('Alasan penolakan (opsional):') || '';
-                if (notes === null) return;
+                const promptResult = prompt('Alasan penolakan (opsional):');
+                if (promptResult === null) return;
+                notes = promptResult || '';
             } else {
                 const confirmMsg = 'Konfirmasi pembayaran ini?\nStok akan dikurangi dan transaksi dianggap selesai.';
                 if (!confirm(confirmMsg)) return;

@@ -830,6 +830,7 @@ function processSavePromotion(data) {
             for (let i = 1; i < records.length; i++) {
                 if (records[i][0] === data.id) { rowIndex = i + 1; break; }
             }
+            if (rowIndex === -1) throw new Error("Promo dengan ID tersebut tidak ditemukan.");
             sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
         } else {
             sheet.appendRow(rowData);
@@ -860,6 +861,7 @@ function processDeletePromotion(data) {
                 return { success: true };
             }
         }
+        throw new Error("Promo tidak ditemukan.");
     } finally {
         lock.releaseLock();
     }
@@ -911,7 +913,7 @@ function processCashCheckout(data, session) {
         const txSheet = ss.getSheetByName(SHEET_TRANSACTIONS);
         const detailSheet = ss.getSheetByName(SHEET_TX_DETAILS);
         
-        const txRow = [txId, date, session.userId, finalTotal, data.customerId || "", paid, change, 'cash', 'completed'];
+        const txRow = [txId, date, session.userId, finalTotal, data.customerId || "", paid, change, data.paymentMethod || 'cash', 'completed'];
         let detailsRows = [];
         
         calculation.validatedCart.forEach(item => {
@@ -927,7 +929,7 @@ function processCashCheckout(data, session) {
         const prodData = productSheet.getDataRange().getValues();
         
         calculation.validatedCart.forEach(item => {
-            const dbProduct = prodData.find(row => row[0] === item.id);
+            const dbProduct = prodData.slice(1).find(row => row[0] === item.id);
             if (!dbProduct || dbProduct[5] < item.qty) {
                 throw new Error(`Transaksi dibatalkan: Stok produk ${item.name} tidak mencukupi.`);
             }
@@ -1192,7 +1194,6 @@ function processPaymentConfirmation(data) {
         const confSheet = ss.getSheetByName(SHEET_PAYMENT_CONFIRMATIONS);
         const txSheet = ss.getSheetByName(SHEET_TRANSACTIONS);
         const detailSheet = ss.getSheetByName(SHEET_TX_DETAILS);
-        const promoSheet = ss.getSheetByName(SHEET_PROMOTIONS);
 
         const confData = confSheet.getDataRange().getValues();
         let confRow = -1, txId = null, total = 0;
@@ -1436,7 +1437,7 @@ function sendInvoiceEmail(data) {
         attachments: [pdf],
         name: settings.storeName,
         htmlBody: `
-            <div style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; rounded-xl: 12px;">
+            <div style="font-family: sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
                 <h2 style="color: #059669; border-bottom: 2px solid #059669; padding-bottom: 10px;">Invoice Transaksi ${transactionId}</h2>
                 <p>Halo,</p>
                 <p>Terima kasih telah berbelanja di <b>${settings.storeName}</b>. Kami menghargai kepercayaan Anda.</p>
@@ -1454,7 +1455,7 @@ function sendInvoiceEmail(data) {
         `
     });
 
-    return { success: true, message: "Email berhasil dikirim." };
+    return { success: true, data: "Email berhasil dikirim." };
 }
 
 function searchTransactions(data) {
@@ -1613,12 +1614,14 @@ function getDashboardData() {
                     name: p ? p.name : 'Unknown',
                     qty: qty,
                     expiryDate: Utilities.formatDate(expDate, tz, "dd MMM yyyy"),
+                    _expiryTs: expDate.getTime(),
                     status: isExpired ? "Kedaluwarsa" : "Hampir Habis"
                 });
             }
         }
     }
-    expiringSoon.sort((a, b) => new Date(a.expiryDate) - new Date(b.expiryDate));
+    expiringSoon.sort((a, b) => a._expiryTs - b._expiryTs);
+    expiringSoon.forEach(item => delete item._expiryTs);
 
     let salesData = {};
     for (let i = 6; i >= 0; i--) {
@@ -1957,6 +1960,10 @@ function generateCashflowReport(start, end, tz) {
 function updateDailySummary(date, revenue, profit) {
     const ss = getDb();
     const sheet = ss.getSheetByName(SHEET_DAILY_SUMMARY);
+    if (!sheet) {
+        console.warn('Sheet DailySummary tidak ditemukan. Melewati update ringkasan harian.');
+        return;
+    }
     const data = sheet.getDataRange().getValues();
     const dateStr = Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd");
 
@@ -2034,7 +2041,7 @@ function initializeDatabase() {
 
     createOrReset(SHEET_PAYMENT_CONFIRMATIONS, [
         'ConfirmationID', 'TransactionID', 'CashierID', 'TotalAmount', 'PaymentMethod',
-        'Status', 'RequestTime', 'ConfirmationTime', 'AdminID', 'Notes'
+        'Status', 'RequestTime', 'ConfirmationTime', 'AdminID', 'Notes', 'NotifiedFlag'
     ]);
 
     createOrReset(SHEET_DAILY_SUMMARY, ['Date', 'TotalRevenue', 'TotalProfit', 'TransactionCount']);
