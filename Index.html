@@ -19,9 +19,10 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-    <!-- Thermal Printer -->
+    <!-- Thermal Printer (DINONAKTIFKAN SEMENTARA - menyebabkan blank screen)
     <script src="https://cdn.jsdelivr.net/npm/@point-of-sale/receipt-printer-encoder@3.0.3/dist/receipt-printer-encoder.umd.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@point-of-sale/webbluetooth-receipt-printer@2.0.0/dist/webbluetooth-receipt-printer.umd.js"></script>
+    -->
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -782,17 +783,16 @@
             </div>
             <div class="p-4 border-t border-slate-100 flex flex-wrap justify-end gap-3 bg-slate-50">
 
-                <!-- Tombol Hubungkan Printer -->
+                <!-- Tombol Printer Bluetooth (DINONAKTIFKAN SEMENTARA)
                 <button id="btn-connect-printer" onclick="connectPrinter()"
                         class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2.5 rounded-xl font-bold transition flex items-center gap-2">
                     <i class="ph-bold ph-link"></i> Hubungkan Printer Bluetooth
                 </button>
-
-                <!-- Tombol Cetak Thermal -->
                 <button id="btn-print-thermal" onclick="printThermalReceipt(lastThermalReceiptData)" disabled
                         class="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 text-white px-4 py-2.5 rounded-xl font-bold transition flex items-center gap-2">
                     <i class="ph-bold ph-printer"></i> Cetak Thermal (Bluetooth)
                 </button>
+                -->
 
                 <button onclick="printReceiptA6(currentDetailTxId)"
                     class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold transition flex items-center gap-2">
@@ -1639,7 +1639,7 @@
         }
         setViewportHeight();
 
-        // ================== PRINTER THERMAL SETUP ==================
+        /* ================== PRINTER THERMAL SETUP (DINONAKTIFKAN SEMENTARA) ==================
         const PRINTER_STORAGE_KEY = 'pos_printer_v2';
         const RECEIPT_COLUMNS_DEFAULT = 32;
         const RECEIPT_COLUMNS_SUPPORTED = { 32: true, 35: true, 42: true, 44: true, 48: true };
@@ -1653,231 +1653,31 @@
         };
 
         let receiptPrinter = null;
-        let printerSettings = null;        // { language, codepageMapping, columns }
+        let printerSettings = null;
         let isPrinterConnected = false;
         let isConnecting = false;
-        let lastThermalReceiptData = null; // data transaksi terakhir untuk cetak ulang
+        let lastThermalReceiptData = null;
 
-        function normalizePrinterLanguage(lang) {
-            const s = String(lang || '').toLowerCase();
-            if (s === 'star-prnt' || s === 'star-line') return s;
-            return 'esc-pos';
-        }
+        function normalizePrinterLanguage(lang) { ... }
+        function normalizeCodepageMapping(mapping) { ... }
+        function normalizeColumns(v) { ... }
+        function getReceiptColumns() { ... }
+        function rememberPrinter(device) { ... }
+        function setupBluetoothPrinter() { ... }
+        async function connectPrinter() { ... }
+        function updatePrinterButtons() { ... }
+        function createEncoderWithFallback(columns) { ... }
+        function formatLine(left, right, width) { ... }
+        function buildThermalData(tx) { ... }
+        async function printThermalReceipt(tx) { ... }
+        ================== END PRINTER THERMAL (DINONAKTIFKAN) ================== */
 
-        function normalizeCodepageMapping(mapping) {
-            if (typeof mapping === 'object') return mapping; // custom object
-            const key = CODEPAGE_ALIASES[String(mapping || '').toLowerCase()] || mapping;
-            return SUPPORTED_CODEPAGE_MAPPINGS[key] ? key : '';
-        }
-
-        function normalizeColumns(v) {
-            const n = parseInt(v);
-            return RECEIPT_COLUMNS_SUPPORTED[n] ? n : 0;
-        }
-
-        function getReceiptColumns() {
-            return printerSettings?.columns || RECEIPT_COLUMNS_DEFAULT;
-        }
-
-        function rememberPrinter(device) {
-            const data = {
-                id: device.id,
-                name: device.name,
-                language: normalizePrinterLanguage(device.language),
-                codepageMapping: device.codepageMapping,
-                columns: device.columns
-            };
-            localStorage.setItem(PRINTER_STORAGE_KEY, JSON.stringify(data));
-        }
-
-        function setupBluetoothPrinter() {
-            if (typeof WebBluetoothReceiptPrinter === 'undefined') {
-                console.warn('Library WebBluetoothReceiptPrinter tidak ditemukan');
-                return;
-            }
-            if (typeof ReceiptPrinterEncoder === 'undefined') {
-                console.warn('Library ReceiptPrinterEncoder tidak ditemukan');
-                return;
-            }
-            receiptPrinter = new WebBluetoothReceiptPrinter();
-
-            // Baca data printer terakhir dari localStorage untuk UI
-            try {
-                const saved = localStorage.getItem(PRINTER_STORAGE_KEY);
-                if (saved) {
-                    const savedData = JSON.parse(saved);
-                    // Hanya untuk menampilkan nama terakhir, bukan auto-connect
-                    if (savedData.name) {
-                        printerSettings = printerSettings || {};
-                        printerSettings.lastKnownName = savedData.name;
-                    }
-                }
-            } catch(e) { /* ignore parse error */ }
-
-            receiptPrinter.addEventListener('connected', (event) => {
-                const device = event.detail || event;
-                printerSettings = {
-                    name: device.name || 'Tanpa Nama',
-                    language: normalizePrinterLanguage(device.language),
-                    codepageMapping: normalizeCodepageMapping(device.codepageMapping),
-                    columns: normalizeColumns(device.columns)
-                };
-                isPrinterConnected = true;
-                isConnecting = false;
-                rememberPrinter(device);
-                updatePrinterButtons();
-                showToast(`Printer tersambung: ${device.name || 'Tanpa Nama'}`);
-            });
-
-            receiptPrinter.addEventListener('disconnected', () => {
-                printerSettings = null;
-                isPrinterConnected = false;
-                isConnecting = false;
-                updatePrinterButtons();
-                showToast('Printer terputus', 'error');
-            });
-        }
-
-        async function connectPrinter() {
-            if (!isSecureContext) {
-                return alert('Bluetooth hanya bisa di HTTPS. Buka URL deploy Web App.');
-            }
-            if (window.top !== window.self) {
-                return alert('Buka aplikasi di tab browser langsung, bukan dari dalam editor.');
-            }
-            if (!navigator.bluetooth) {
-                return alert('Browser tidak mendukung Web Bluetooth. Gunakan Chrome Android terbaru.');
-            }
-
-            if (!receiptPrinter) {
-                setupBluetoothPrinter();
-            }
-
-            if (isConnecting) return;
-            isConnecting = true;
-            updatePrinterButtons();
-
-            try {
-                await receiptPrinter.connect();
-                // event 'connected' akan menangani sisanya
-            } catch (err) {
-                isConnecting = false;
-                updatePrinterButtons();
-                showToast('Gagal hubungkan printer: ' + err.message, 'error');
-            }
-        }
-
-        function updatePrinterButtons() {
-            const connectBtn = document.getElementById('btn-connect-printer');
-            const printBtn = document.getElementById('btn-print-thermal');
-            if (connectBtn) {
-                connectBtn.disabled = isConnecting;
-                connectBtn.innerHTML = isConnecting
-                    ? '<i class="ph-bold ph-spinner animate-spin mr-1"></i> Menghubungkan...'
-                    : isPrinterConnected
-                        ? `<i class="ph-bold ph-link mr-1"></i> Printer: ${printerSettings?.name || 'Ready'}`
-                        : '<i class="ph-bold ph-link mr-1"></i> Hubungkan Printer Bluetooth';
-            }
-            if (printBtn) {
-                printBtn.disabled = !isPrinterConnected || !lastThermalReceiptData;
-            }
-        }
-
-        function createEncoderWithFallback(columns) {
-            const lang = printerSettings?.language || 'esc-pos';
-            const cp = printerSettings?.codepageMapping;
-            const attempts = [];
-
-            if (cp) attempts.push({ language: lang, columns, codepageMapping: cp });
-            // Fallback umum untuk ESC/POS
-            attempts.push({ language: lang, columns, codepageMapping: 'epson' });
-            attempts.push({ language: lang, columns });
-            attempts.push({ columns });
-
-            let lastError;
-            for (const opt of attempts) {
-                try {
-                    return new ReceiptPrinterEncoder(opt);
-                } catch (e) {
-                    lastError = e;
-                    if (!/unknown codepage mapping/i.test(e.message)) throw e;
-                }
-            }
-            throw lastError || new Error('Tidak dapat membuat encoder printer');
-        }
-
-        function formatLine(left, right, width) {
-            const r = String(right).padStart(Math.max(1, width - left.length));
-            return left + r;
-        }
-
-        function buildThermalData(tx) {
-            const width = getReceiptColumns();
-            const encoder = createEncoderWithFallback(width);
-
-            encoder
-                .initialize()
-                .align('center')
-                .bold(true)
-                .line(state.settings?.storeName || 'Toko')
-                .bold(false)
-                .line('Struk Pembayaran')
-                .newline()
-                .align('left')
-                .line(`No: ${tx.id}`)
-                .line(`Tgl : ${tx.date}`)
-                .line(`Kasir: ${tx.cashier}`)
-                .line('-'.repeat(width));
-
-            tx.items.forEach(item => {
-                const left = `${item.productName} (${item.qty})`;
-                const right = `Rp ${item.subtotal.toLocaleString('id-ID')}`;
-                encoder.line(formatLine(left, right, width));
-            });
-
-            encoder
-                .line('-'.repeat(width))
-                .bold(true)
-                .line(formatLine('TOTAL', `Rp ${tx.total.toLocaleString('id-ID')}`, width))
-                .bold(false)
-                .line(formatLine('Bayar', `Rp ${tx.amountPaid.toLocaleString('id-ID')}`, width))
-                .line(formatLine('Kembali', `Rp ${tx.change.toLocaleString('id-ID')}`, width))
-                .newline()
-                .align('center')
-                .line('Terima kasih')
-                .cut();
-
-            return encoder.encode();
-        }
-
-        async function printThermalReceipt(tx) {
-            if (!tx) {
-                showToast('Tidak ada data transaksi untuk dicetak', 'error');
-                return;
-            }
-            if (!isPrinterConnected || !receiptPrinter) {
-                showToast('Printer belum terhubung. Silakan sambungkan dulu.', 'error');
-                return;
-            }
-
-            toggleLoader(true, 'Mencetak struk...');
-            try {
-                const data = buildThermalData(tx);
-                await receiptPrinter.print(data);
-                showToast('Struk berhasil dikirim ke printer thermal');
-            } catch (err) {
-                console.error(err);
-                showToast('Gagal mencetak: ' + err.message, 'error');
-                if (/messageSize/i.test(err.message)) {
-                    // Kemungkinan printer disconnect
-                    isPrinterConnected = false;
-                    printerSettings = null;
-                    updatePrinterButtons();
-                }
-            } finally {
-                toggleLoader(false);
-            }
-        }
+        // Stub functions agar tidak error jika ada referensi tersisa
+        let lastThermalReceiptData = null;
+        function setupBluetoothPrinter() { /* dinonaktifkan */ }
+        function connectPrinter() { showToast('Fitur printer Bluetooth dinonaktifkan sementara.', 'error'); }
+        function updatePrinterButtons() { /* dinonaktifkan */ }
+        function printThermalReceipt() { showToast('Fitur cetak thermal dinonaktifkan sementara.', 'error'); }
 
 
         const formatRp = (num) => {
@@ -2042,7 +1842,7 @@
 
             if (token && savedUser) {
                 try {
-                    setupBluetoothPrinter();
+                    // setupBluetoothPrinter(); // DINONAKTIFKAN SEMENTARA
                     await apiCall('getProducts');
                     state.user = JSON.parse(savedUser);
                     showView('app');
@@ -2214,7 +2014,7 @@
                 state.user = user;
                 e.target.reset();
                 showView('app');
-                setupBluetoothPrinter();
+                // setupBluetoothPrinter(); // DINONAKTIFKAN SEMENTARA
                 setTimeout(() => {
                     setupUserRole();
                     showToast('Berhasil masuk!');
@@ -3314,6 +3114,7 @@
                 const res = await getTxDetailData(transactionId);
                 renderTransactionDetail(res);
 
+                /* DINONAKTIFKAN SEMENTARA - printer thermal
                 // Populate lastThermalReceiptData dari detail untuk cetak thermal
                 const { header, items } = res;
                 lastThermalReceiptData = {
@@ -3331,6 +3132,7 @@
                     }))
                 };
                 updatePrinterButtons();
+                */
 
                 toggleTransactionDetailModal(true);
             } catch (err) {
@@ -3474,6 +3276,7 @@
                 const txId = res.receipt;
                 const status = res.status || 'completed';
 
+                /* DINONAKTIFKAN SEMENTARA - printer thermal
                 // Simpan data untuk cetak thermal
                 lastThermalReceiptData = {
                     id: txId,
@@ -3490,6 +3293,7 @@
                     }))
                 };
                 updatePrinterButtons();
+                */
 
                 if (status === 'pending') {
                     showToast('Transaksi non-tunai menunggu konfirmasi admin.', 'success');
